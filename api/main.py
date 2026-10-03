@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 from api.data import DataError, get_alert, get_ice, get_layer, get_lifelines, get_stats, list_dates
-from api.llm import ask, generate_alert, situation_report
+from ai.llm import ask, generate_alert, infer, situation_report
 
 LayerKind = Literal["extra", "ice", "water"]
 Audience = Literal["coordinator", "community", "pilots"]
@@ -93,6 +93,18 @@ def ask_question(body: AskBody):
     history = [turn.model_dump() for turn in body.history]
     try:
         return ask(question, history)
+    except DataError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.message) from exc
+
+
+@app.post("/api/infer")
+def infer_question(body: AskBody):
+    question = body.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question is empty.")
+    history = [turn.model_dump() for turn in body.history]
+    try:
+        return infer(question, history)
     except DataError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.message) from exc
 

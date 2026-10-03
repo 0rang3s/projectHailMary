@@ -1,4 +1,12 @@
-"""Groq tool-use for questions, audience alerts, and the situation report."""
+"""Groq tool-use for questions, audience alerts, the situation report, and evidence-based inference.
+
+Lives at ai/chat.py. Changes from the original version:
+  - imports template_alert from ai.alerts (your moved alert code)
+  - registers inference tools (get_findings, search_knowledge)
+  - _tool_loop keeps every tool result as evidence so claims can be checked
+  - infer() answers with claims that cite evidence, validated by inference.finish()
+  - the final no-tools call now still passes tools, which some providers require
+"""
 
 from __future__ import annotations
 
@@ -6,9 +14,17 @@ import json
 import os
 import re
 import time
+from pathlib import Path
 from typing import Iterable
 
-from alert.generate_alert import template_alert
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+except ImportError:
+    pass
+
+from ai import inference
+from ai.alerts import template_alert
 from api.data import (
     DataError,
     compare,
@@ -158,6 +174,7 @@ _RUNNERS = {
     "get_ice": lambda args: get_ice(args["date"]),
     "compare": lambda args: compare(args["date_a"], args["date_b"]),
 }
+_RUNNERS.update(inference.RUNNERS)   # get_findings, search_knowledge
 
 _ask_cache: dict[tuple, dict] = {}
 _alert_cache: dict[tuple, dict] = {}
@@ -182,6 +199,7 @@ def ask(question: str, history: list[dict] | None = None) -> dict:
             tools=TOOLS,
             max_tokens=700,
         )
+        result.pop("evidence", None)
     except Exception as exc:
         print("ask failed:", exc)
         return {
@@ -192,6 +210,97 @@ def ask(question: str, history: list[dict] | None = None) -> dict:
     if key:
         _ask_cache[key] = result
     return result
+
+
+_infer_cache: dict[tuple, dict] = {}
+
+_rewrite_cache: dict[tuple, str] = {}
+
+
+def _rewrite_query(question: str, findings: dict) -> str:
+    """The main model writes the document search query from the question AND the data."""
+    key = (revision(), question)
+    if key in _rewrite_cache:
+        return _rewrite_cache[key]
+    text = ""
+    try:
+        from groq import Groq
+
+        client = Groq(api_key=os.environ["GROQ_API_KEY"], timeout=20.0, max_retries=0)
+        r = client.chat.completions.create(
+            model=os.environ.get("LLM_MODEL", "openai/gpt-oss-120b"),
+            temperature=0, max_tokens=500,
+            messages=[
+                {"role": "system", "content": (
+                    "You write search queries for a small library of short documents about river ice "
+                    "jams, spring breakup flooding, flood guidance, and how remote communities depend "
+                    "on airstrips, causeways and dikes. Given a question and a digest of radar "
+                    "findings, list 10 to 15 plain keywords or short phrases for the processes, "
+                    "mechanisms, infrastructure and guidance topics that would help explain what the "
+                    "findings show for this question. Use ordinary words a short article would use. "
+                    "Do not include numbers or dates. Output only the keywords, comma separated.")},
+                {"role": "user", "content": (
+                    f"QUESTION: {question}\n\nFINDINGS DIGEST:\n{inference.digest(findings)}")}])
+        text = (r.choices[0].message.content or "").strip()
+    except Exception as exc:
+        print("rewrite failed:", exc)
+    if text:
+        _rewrite_cache[key] = text
+    return text
+
+
+def infer(question: str, history: list[dict] | None = None) -> dict:
+    """Evidence-based answer in ONE model call: evidence is fetched in code, not by tool rounds."""
+    empty = {"claims": [], "not_known": [], "dropped_claims": 0, "unverified_numbers": [],
+             "verified": False, "tools_used": [], "dates_cited": []}
+    if not os.environ.get("GROQ_API_KEY"):
+        return {**empty, "summary": "AI not configured. Add GROQ_API_KEY to the .env file."}
+    question = question.strip()
+    key = None if history else (revision(), question.lower())
+    if key and key in _infer_cache:
+        return _infer_cache[key]
+    try:
+        from groq import Groq
+
+        findings = inference.build_findings()
+        rewritten = _rewrite_query(question, findings)
+        query = f"{question} {rewritten}" if rewritten else f"{question} {inference.TOPIC_HINT}"
+        context = json.dumps(
+            {"findings": inference.slim(findings),
+             "documents": inference.search_knowledge(query, k=4)},
+            separators=(",", ":"), ensure_ascii=False)
+        messages = [
+            {"role": "system", "content": inference.SYSTEM + inference.NO_TOOLS_NOTE},
+            *_history_messages(history or []),
+            {"role": "user", "content": f"EVIDENCE (JSON):\n{context}\n\nQUESTION: {question}"},
+        ]
+        client = Groq(api_key=os.environ["GROQ_API_KEY"], timeout=60.0, max_retries=0)
+        primary = os.environ.get("LLM_MODEL", "openai/gpt-oss-120b")
+        fallback = os.environ.get("LLM_FALLBACK_MODEL", "openai/gpt-oss-20b")
+        answer, last = "", None
+        for model in dict.fromkeys([primary, fallback]):
+            try:
+                response = client.chat.completions.create(
+                    model=model, temperature=0, max_tokens=1000,
+                    response_format={"type": "json_object"}, messages=messages)
+                answer = (response.choices[0].message.content or "").strip()
+                if answer:
+                    break
+            except Exception as exc:
+                last = exc
+                print(f"infer: {model} failed:", exc)
+        if not answer:
+            raise last or RuntimeError("empty answer")
+        result = {"answer": answer, "evidence": context, "dates_cited": [],
+                  "tools_used": [{"name": "get_findings", "input": {}},
+                                 {"name": "search_knowledge", "input": {"query": question}}]}
+        out = inference.finish(result, question)
+        if key and out.get("claims"):
+            _infer_cache[key] = out
+        return out
+    except Exception as exc:
+        print("infer failed:", exc)
+        return {**empty, "summary": "The AI service couldn't answer just now. Try again in a moment."}
 
 
 def generate_alert(date: str, audience: str) -> dict:
@@ -376,12 +485,13 @@ def _tool_loop(model: str, system: str, messages: list[dict], tools, max_tokens:
     client = Groq(api_key=os.environ["GROQ_API_KEY"], timeout=90.0, max_retries=0)
     thread = [{"role": "system", "content": system}, *messages]
     tools_used: list[dict] = []
+    evidence: list[str] = []          # every tool result, kept so claims can be checked
     dates: set[str] = set()
     kwargs = {"model": model, "temperature": 0.2, "max_tokens": max_tokens}
-    rounds = 5 if tools else 1
+    rounds = 6 if tools else 1
     for round_index in range(rounds):
         request = dict(kwargs)
-        if tools and round_index < 5:
+        if tools:
             request["tools"] = tools
             request["tool_choice"] = "auto"
         response = client.chat.completions.create(messages=thread, **request)
@@ -392,6 +502,7 @@ def _tool_loop(model: str, system: str, messages: list[dict], tools, max_tokens:
                 "answer": (message.content or "").strip(),
                 "tools_used": tools_used,
                 "dates_cited": sorted(dates),
+                "evidence": "\n".join(evidence),
             }
         thread.append(_assistant_tool_message(message))
         for call in calls:
@@ -401,16 +512,24 @@ def _tool_loop(model: str, system: str, messages: list[dict], tools, max_tokens:
             result = _run_tool(name, args) if parsed_ok else {"error": "Could not read tool arguments."}
             if not (isinstance(result, dict) and "error" in result):
                 dates.update(_dates_from(name, args, result))
+            payload = json.dumps(result)
+            evidence.append(payload)
             thread.append({
                 "role": "tool",
                 "tool_call_id": call.id,
-                "content": json.dumps(result),
+                "content": payload,
             })
-    response = client.chat.completions.create(messages=thread, tool_choice="none", **kwargs)
+    # Out of rounds: force a final answer. Tools must still be declared because the thread has tool calls.
+    final = dict(kwargs)
+    if tools:
+        final["tools"] = tools
+    final["tool_choice"] = "none"
+    response = client.chat.completions.create(messages=thread, **final)
     return {
         "answer": (response.choices[0].message.content or "").strip(),
         "tools_used": tools_used,
         "dates_cited": sorted(dates),
+        "evidence": "\n".join(evidence),
     }
 
 
