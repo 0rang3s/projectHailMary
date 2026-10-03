@@ -23,7 +23,7 @@ The free AWS archive only starts in spring 2025, so our normal day is the summer
 
 ## What we found
 
-Extra water compared to normal was about 66.6 km² on Apr 30, 67.0 km² on May 7 and 20.1 km² on May 19. On the emergency night, water got within roughly 60–200 m of Fort Albany's airstrip and causeway area, when normally it's 370–490 m away. That lines up with the news saying the causeway was less than a foot from overflowing.
+Extra water compared to normal, along the river, was about 66.5 km² on Apr 30, 20.7 km² on May 7 and 13.0 km² on May 19. We leave out the James Bay shoreline east of the river mouth, because the tidal flats and breaking sea ice there aren't river flooding (with the shore included it was 67.0 km² on May 7 and 20.1 km² on May 19, and both numbers are saved in `stats.json`). Apr 30 is a different, uncalibrated product and a lot of the river was hidden under ice, so don't compare it straight against the May numbers. On the emergency night, water got within roughly 60–200 m of Fort Albany's airstrip and causeway area, when normally it's 370–490 m away. That lines up with the news saying the causeway was less than a foot from overflowing.
 
 The ice result is the big one. On Apr 30 the river was 97–99% frozen within 5 km of both towns while only about 11% frozen upstream, which is the classic ice-jam setup. By May 7 it was fully open at Fort Albany and only 30% frozen at Kashechewan, and by May 19 it was basically all open. We tested different cutoffs and smoothing and the near-town number stays at 93–100% no matter what, so it's not a fluke of one setting.
 
@@ -31,8 +31,12 @@ The ice result is the big one. On Apr 30 the river was 97–99% frozen within 5 
 
 ```bash
 pip install -r requirements.txt
-streamlit run app/app.py
+streamlit run frontend/app.py
 ```
+
+`frontend/app.py` is the dashboard (timeline, map, lifelines, ice, charts, and Ask Cut Off).
+
+Ask Cut Off answers from these radar files on its own. For the fuller assistant that looks up any date, copy `.env.example` to `.env` and add a `GROQ_API_KEY`. Alerts for coordinators, the community, and pilots, plus the situation report, work either way.
 
 Use the slider at the top to move between dates. Blue is where water normally is, red is extra water on that date, and the dots are lifelines coloured by how close the water is (red means 200 m or less, yellow means within 1 km).
 
@@ -67,9 +71,8 @@ Open http://localhost:5173. The page talks to the API at http://localhost:8000 t
 - `pipeline/ice.py` is the ice-jam detector
 - `pipeline/get_ard_baseline.py` downloads RCM pictures from AWS (no ordering needed)
 - `alert/generate_alert.py` writes a short plain-language alert from the numbers
-- `api/` is the FastAPI backend (dates, map layers, questions, alerts, situation report)
-- `web/` is the map and chat frontend
-- `app/app.py` is the Streamlit backup demo
+- `api/` is the assistant the dashboard calls for questions, alerts, and the situation report
+- `frontend/app.py` is the dashboard
 - `data/real/` holds all the processed results
 - `outputs/flood_story.png` is the before/after image for the slides
 - `outputs/ice_jam.png` shows the frozen river on Apr 30 vs open on May 7
@@ -95,5 +98,5 @@ The `_db.tif` files aren't in the repo, so to rerun the Apr 30 ice step you need
 
 ## Things to keep in mind
 
-The Apr 30 picture is a different product from the others and isn't calibrated, so compare it with some care. It was also sitting about 40 m off from the other pictures, so we nudge it back into place (`--shift-px 2,0`). On Apr 30 a lot of the river near the towns was still iced over, and ice doesn't show up as water, so Kashechewan's flood is probably under-counted that day. The ice detector catches that instead. Some of the upstream ice it flags on Apr 30 could just be noise, since that picture is grainier. Some of the red patches away from the river could be pooled meltwater, wet snow or just radar noise, so the red right along the river is what to focus on. The causeway and town centre locations are approximate for now. Distances are to the nearest water we detected at 20 m resolution.
+The Apr 30 picture is a different product from the others and isn't calibrated, so compare it with some care. It was also sitting about 40 m off from the other pictures, so we nudge it back into place (`--shift-px 2,0`). On Apr 30 a lot of the river near the towns was still iced over, and ice doesn't show up as water, so Kashechewan's flood is probably under-counted that day. The ice detector catches that instead. Some of the upstream ice it flags on Apr 30 could just be noise, since that picture is grainier. Some of the red patches away from the river could be pooled meltwater, wet snow or just radar noise, so the red right along the river is what to focus on. The causeway and town centre locations are approximate for now. Distances count open water, river ice and the river's normal channel, because a frozen river is still the river and the river doesn't disappear during a flood. That's why Kashechewan never shows up as farther than normal anymore. The open-water-only distance is still saved as `dist_open_water_m`. Run `pipeline/ice.py` before `pipeline/analyze.py`, since the distance step uses the ice map.
 
