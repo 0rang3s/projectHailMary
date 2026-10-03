@@ -1,16 +1,1 @@
-numpy
-scipy
-scikit-image
-rasterio
-geopandas
-shapely
-pyproj
-streamlit
-folium
-streamlit-folium
-   anthropic
-   groq
-   fastapi
-   uvicorn
-   python-dotenv
-   pystac-client
+

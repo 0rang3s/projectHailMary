@@ -9,6 +9,7 @@
     "source": "Wikipedia: Fort Albany Airport (CYFA)",
     "status": "yellow",
     "dist_flood_m": 252,
+    "dist_open_water_m": 252,
     "dist_normal_m": 494,
     "closer_by_m": 242
   },
@@ -20,10 +21,11 @@
     "lon": -81.67778,
     "verified": true,
     "source": "Wikipedia: Kashechewan Airport (CZKE)",
-    "status": "green",
-    "dist_flood_m": 2101,
+    "status": "yellow",
+    "dist_flood_m": 423,
+    "dist_open_water_m": 2101,
     "dist_normal_m": 423,
-    "closer_by_m": -1678
+    "closer_by_m": 0
   },
   {
     "id": "k_town",
@@ -33,10 +35,11 @@
     "lon": -81.659,
     "verified": false,
     "source": "approx: airport is 1.3 km west of community (Wikipedia)",
-    "status": "green",
-    "dist_flood_m": 1424,
+    "status": "yellow",
+    "dist_flood_m": 477,
+    "dist_open_water_m": 1424,
     "dist_normal_m": 477,
-    "closer_by_m": -947
+    "closer_by_m": 0
   },
   {
     "id": "fa_town",
@@ -48,6 +51,7 @@
     "source": "approx: mainland south shore + Sinclair/Anderson islands; check OSM",
     "status": "red",
     "dist_flood_m": 171,
+    "dist_open_water_m": 171,
     "dist_normal_m": 194,
     "closer_by_m": 23
   },
@@ -61,6 +65,7 @@
     "source": "PLACEHOLDER - find on OSM",
     "status": "yellow",
     "dist_flood_m": 361,
+    "dist_open_water_m": 361,
     "dist_normal_m": 374,
     "closer_by_m": 13
   }

@@ -201,13 +201,25 @@ def pct_text(value):
 
 
 def near_range(ice):
-    vals = near_vals(ice)
+    """Per-town ice, e.g. 'Kashechewan 30% · Fort Albany 0%' (no ranges: they read as unsure)."""
+    towns = []
+    for key, val in (ice or {}).get("near_towns", {}).items():
+        pct = val.get("pct_frozen") if isinstance(val, dict) else None
+        if pct is not None:
+            towns.append(f"{key.split(' (')[0]} {pct_text(pct)}")
+    return " · ".join(towns) if towns else None
+
+
+def near_tile(ice):
+    """Short tile version: value '99% · 97%', label 'Frozen near Kashechewan · Fort Albany'."""
+    vals, names = [], []
+    for key, val in (ice or {}).get("near_towns", {}).items():
+        pct = val.get("pct_frozen") if isinstance(val, dict) else None
+        if pct is not None:
+            vals.append(pct_text(pct)); names.append(key.split(" (")[0])
     if not vals:
-        return None
-    lo, hi = min(vals), max(vals)
-    if lo == hi:
-        return pct_text(lo)
-    return f"{pct_text(lo).rstrip('%')}–{pct_text(hi)}"
+        return "—", "Frozen near the communities"
+    return " · ".join(vals), "Frozen near " + " · ".join(names)
 
 
 def ice_rows(ice):
@@ -296,15 +308,15 @@ def answer_question(kind, current, scenes, free_text=""):
             parts.append(f"Open water is {km(stats['flood_water_km2'])} km², under the baseline "
                          f"{km(stats['normal_water_km2'])} km², because ice-covered river is mapped as ice rather than water.")
         if ice and ice.get("jam_risk"):
-            parts.append(f"The river is {near_range(ice)} frozen near the communities and "
-                         f"{pct_text(ice['upstream_pct_frozen'])} frozen upstream. That contrast is flagged as an ice-jam pattern.")
+            parts.append(f"River frozen near the communities: {near_range(ice)}, against "
+                         f"{pct_text(ice['upstream_pct_frozen'])} upstream. That contrast is flagged as an ice-jam pattern.")
         elif ice:
-            parts.append(f"Ice near the communities is {near_range(ice)}, and upstream is "
-                         f"{pct_text(ice['upstream_pct_frozen'])} frozen. No ice-jam pattern is flagged.")
+            parts.append(f"River frozen near the communities: {near_range(ice)}; upstream "
+                         f"{pct_text(ice['upstream_pct_frozen'])}. No ice-jam pattern is flagged.")
         near = closest(current["lifelines"])
         if near:
             top = near[0]
-            parts.append(f"Closest lifeline: {top['name']}, {fmt_m(top['dist_flood_m'])} from detected water "
+            parts.append(f"Closest lifeline: {top['name']}, {fmt_m(top['dist_flood_m'])} from water or river ice "
                          f"(normally {fmt_m(top['dist_normal_m'])}).")
         return " ".join(parts)
 
@@ -345,8 +357,8 @@ def answer_question(kind, current, scenes, free_text=""):
     if rule:
         text += f" Rule stored with the result: {rule}."
     if current["date"] != jam["date"] and current["ice"]:
-        text += (f" On {long_date(current['date'])} ice near the communities is {near_range(current['ice'])} "
-                 f"and upstream is {pct_text(current['ice']['upstream_pct_frozen'])}.")
+        text += (f" On {long_date(current['date'])} the river near the communities is frozen: {near_range(current['ice'])}; "
+                 f"upstream {pct_text(current['ice']['upstream_pct_frozen'])}.")
     elif current["baseline"]:
         text += f" {long_date(current['date'])} is the summer baseline, so river ice was not measured."
     return text
@@ -492,7 +504,7 @@ def summary_card(scene):
             sentence = "No ice-jam pattern is flagged for this date." if ice else "River ice was not measured for this scene."
         metrics = [(f"{km(stats['extra_water_km2'])} km²", "Additional water")]
         if ice:
-            metrics.append((near_range(ice) or "—", "River frozen near communities"))
+            metrics.append(near_tile(ice))
             metrics.append((pct_text(ice.get("upstream_pct_frozen")), "Frozen upstream"))
         caption = (f"Open water this date {km(stats['flood_water_km2'])} km² · "
                    f"normal open water {km(stats['normal_water_km2'])} km².")
@@ -518,7 +530,7 @@ def summary_card(scene):
 
 def lifeline_card(line, selected, baseline, index=0):
     cls = f"ll {line['status']}" + (" on" if selected else "")
-    where = "from summer water" if baseline else "from detected water"
+    where = "from summer water" if baseline else "from water or river ice"
     normal = ""
     if not baseline and line.get("dist_normal_m") is not None:
         text = f"Normal: {fmt_m(line['dist_normal_m'])}"
@@ -664,7 +676,7 @@ def metric_strip(scene):
     else:
         tiles = [("water", f"{km(stats['extra_water_km2'])} km²", "Additional water")]
         if ice:
-            tiles.append(( "ice", near_range(ice) or "—", "Frozen near the communities"))
+            tiles.append(("ice", *near_tile(ice)))
             tiles.append(("up", pct_text(ice.get("upstream_pct_frozen")), "Frozen upstream"))
         else:
             tiles.append(("ice", "—", "River ice"))
@@ -690,10 +702,10 @@ def story_line(scene, normal_date):
         headline = f"{fmt_m(top['dist_flood_m'])} to {pretty_name(top['name'])}"
         detail = f"{km(stats['extra_water_km2'])} km² of additional water."
         if scene["ice"] and scene["ice"].get("jam_risk"):
-            detail = (f"Ice jam. River {near_range(scene['ice'])} frozen near the communities, "
-                      f"{pct_text(scene['ice']['upstream_pct_frozen'])} upstream. " + detail)
+            detail = (f"Ice jam. River frozen near the communities: {near_range(scene['ice'])}; "
+                      f"upstream {pct_text(scene['ice']['upstream_pct_frozen'])}. " + detail)
         elif scene["ice"]:
-            detail += f" Ice near the communities is {near_range(scene['ice'])}."
+            detail += f" River frozen: {near_range(scene['ice'])}."
     else:
         headline = f"{km(stats['extra_water_km2'])} km² of additional water"
         detail = label
