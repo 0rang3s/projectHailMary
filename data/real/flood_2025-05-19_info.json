@@ -1,0 +1,7 @@
+{
+  "kind": "ard",
+  "band": "HV",
+  "threshold_db": -20.0,
+  "water_km2": 171.98,
+  "valid_km2": 3220.0
+}

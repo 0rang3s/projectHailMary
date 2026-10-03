@@ -1,0 +1,7 @@
+[
+  {"id": "fa_airstrip", "name": "Fort Albany airstrip",    "type": "airstrip",  "lat": 52.20361, "lon": -81.69583, "verified": true,  "source": "Wikipedia: Fort Albany Airport (CYFA)"},
+  {"id": "k_airstrip",  "name": "Kashechewan airstrip",    "type": "airstrip",  "lat": 52.28250, "lon": -81.67778, "verified": true,  "source": "Wikipedia: Kashechewan Airport (CZKE)"},
+  {"id": "k_town",      "name": "Kashechewan (community)", "type": "community", "lat": 52.2830,  "lon": -81.6590,  "verified": false, "source": "approx: airport is 1.3 km west of community (Wikipedia)"},
+  {"id": "fa_town",     "name": "Fort Albany (community)", "type": "community", "lat": 52.2050,  "lon": -81.6850,  "verified": false, "source": "approx: mainland south shore + Sinclair/Anderson islands; check OSM"},
+  {"id": "fa_causeway", "name": "Fort Albany causeway",    "type": "causeway",  "lat": 52.2080,  "lon": -81.6900,  "verified": false, "source": "PLACEHOLDER - find on OSM"}
+]

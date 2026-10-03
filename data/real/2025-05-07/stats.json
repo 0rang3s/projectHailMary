@@ -1,0 +1,11 @@
+{
+  "mock": false,
+  "normal_date": "2025-08-07",
+  "flood_date": "2025-05-07",
+  "normal_water_km2": 146.5,
+  "flood_water_km2": 186.1,
+  "extra_water_km2": 67.0,
+  "lifelines_red": 1,
+  "lifelines_yellow": 2,
+  "lifelines_no_data": 0
+}
