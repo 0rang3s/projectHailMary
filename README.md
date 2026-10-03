@@ -31,8 +31,12 @@ The ice result is the big one. On Apr 30 the river was 97–99% frozen within 5 
 
 ```bash
 pip install -r requirements.txt
-streamlit run app/app.py
+streamlit run frontend/app.py
 ```
+
+`frontend/app.py` is the dashboard (timeline, map, lifelines, ice, charts, and Ask Cut Off). `streamlit run app/app.py` opens the earlier view of the same files.
+
+Ask Cut Off answers from these radar files on its own. For the fuller assistant that looks up any date, copy `.env.example` to `.env` and add a `GROQ_API_KEY`. Alerts for coordinators, the community, and pilots, plus the situation report, work either way.
 
 Use the slider at the top to move between dates. Blue is where water normally is, red is extra water on that date, and the dots are lifelines coloured by how close the water is (red means 200 m or less, yellow means within 1 km).
 
