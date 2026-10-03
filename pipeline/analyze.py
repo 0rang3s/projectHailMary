@@ -25,6 +25,7 @@ CRS = "EPSG:32617"
 RED_M, YELLOW_M = 200, 1000          # status thresholds, metres to nearest flood-day water
 
 
+
 def has_data(mask_path, x, y):
     with rasterio.open(mask_path) as src:
         r, c = src.index(x, y)

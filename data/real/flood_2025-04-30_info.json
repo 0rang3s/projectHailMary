@@ -1,7 +1,11 @@
 {
   "kind": "grd",
   "band": "HV",
+  "shift_px": [
+    2.0,
+    0.0
+  ],
   "threshold_db": 47.5,
-  "water_km2": 109.94,
-  "valid_km2": 2598.1
+  "water_km2": 109.92,
+  "valid_km2": 2595.9
 }

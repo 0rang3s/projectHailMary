@@ -49,6 +49,10 @@ st.caption("Fort Albany & Kashechewan First Nations · RADARSAT Constellation Mi
 date = st.select_slider("Flood-season date", options=dates, value=dates[0])
 D = os.path.join(REAL, date)
 stats, lifelines, alert = jload(f"{D}/stats.json"), jload(f"{D}/lifelines_status.json") or [], jload(f"{D}/alert.json")
+ice = jload(f"{D}/ice_stats.json")
+if ice and ice.get("jam_risk"):
+    st.error("⚠️ ICE-JAM PATTERN: river frozen near " + ", ".join(t.split(" (")[0] for t in ice["jam_towns"]) +
+             f" while only {ice['upstream_pct_frozen']}% frozen upstream. Water coming downstream has nowhere to go.")
 
 COLORS = {"red": "#d7301f", "yellow": "#fe9929", "green": "#31a354", "no_data": "#969696"}
 ICON = {"red": "🔴", "yellow": "🟡", "green": "🟢", "no_data": "⚪"}
@@ -69,6 +73,9 @@ with left:
     folium.GeoJson(geo(f"{D}/flood_extra.geojson"), name=f"New water on {date} (vs normal)",
                    style_function=lambda f: {"color": "#d7301f", "fillColor": "#d7301f",
                                              "weight": 0.4, "fillOpacity": 0.6}).add_to(m)
+    folium.GeoJson(geo(f"{D}/river_ice.geojson", tol=0.0001), name=f"River ice on {date}",
+                   style_function=lambda f: {"color": "#00e5ff", "fillColor": "#ffffff",
+                                             "weight": 1.2, "fillOpacity": 0.9}).add_to(m)
     for L in lifelines:
         d = L.get("dist_flood_m")
         tip = f"{L['name']}: {d} m to water (normally {L['dist_normal_m']} m)" if d is not None else f"{L['name']}: not covered"
@@ -77,6 +84,7 @@ with left:
     folium.LayerControl(collapsed=False).add_to(m)
     st_folium(m, height=620, use_container_width=True, key=f"map-{date}")
     st.caption("Blue = where water normally is. Red = extra water on the selected date. "
+               "White with cyan outline = river still frozen. "
                "Dots = lifelines, coloured by distance to water (red ≤ 200 m, yellow ≤ 1 km).")
 
 # ---------- side panel ----------
@@ -89,6 +97,13 @@ with right:
         else:
             st.markdown(f"{ICON[L['status']]} **{L['name']}**  \n{L['dist_flood_m']} m from water "
                         f"(normally {L['dist_normal_m']} m){tag}")
+    if ice:
+        st.divider()
+        st.subheader("River ice")
+        for k, v in ice["near_towns"].items():
+            if v["pct_frozen"] is not None:
+                st.markdown(f"**{k.split(' (')[0]}** (5 km): {v['pct_frozen']}% frozen")
+        st.markdown(f"**Upstream** (15+ km away): {ice['upstream_pct_frozen']}% frozen")
     st.divider()
     st.metric("Extra water vs normal", f"{stats['extra_water_km2']} km²")
     st.caption(f"Normal {stats['normal_water_km2']} km² · this date {stats['flood_water_km2']} km² of open water")
@@ -103,7 +118,13 @@ st.subheader("How the flood changed")
 rows = []
 for d in dates:
     s = jload(os.path.join(REAL, d, "stats.json"))
-    rows.append({"date": d, "extra water vs normal (km²)": s["extra_water_km2"]})
-st.bar_chart(pd.DataFrame(rows).set_index("date"))
+    i = jload(os.path.join(REAL, d, "ice_stats.json")) or {}
+    near = [v["pct_frozen"] for v in i.get("near_towns", {}).values() if v["pct_frozen"] is not None]
+    rows.append({"date": d, "extra water vs normal (km²)": s["extra_water_km2"],
+                 "river frozen near towns (%)": max(near) if near else None})
+df = pd.DataFrame(rows).set_index("date")
+c1, c2 = st.columns(2)
+c1.bar_chart(df[["extra water vs normal (km²)"]])
+c2.bar_chart(df[["river frozen near towns (%)"]], color="#7fd3e6")
 st.caption("Apr 30 comes from a different RCM product (EODMS order, uncalibrated) than May/Aug (analysis-ready data), "
            "and much of the river was still ice-covered that night, so compare it with care.")

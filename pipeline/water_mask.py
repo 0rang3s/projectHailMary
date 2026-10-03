@@ -75,9 +75,13 @@ def to_geojson(mask, transform, out_path, min_area_m2=4000):
     return gdf
 
 
-def run(hh, hv, prefix, threshold=None, band="HH", kind="grd"):
-    """hh/hv = the two band files (for ARD pass rl as 'hh' and rr as 'hv'; band=HV picks the second)."""
+def run(hh, hv, prefix, threshold=None, band="HH", kind="grd", shift_px=(0, 0)):
+    """hh/hv = the two band files (for ARD pass rl as 'hh' and rr as 'hv'; band=HV picks the second).
+    shift_px = (rows, cols) nudge to line this scene up with the baseline (GRD placement can be off by tens of m)."""
     db, t = load_db(hv if band == "HV" else hh, kind)
+    if any(shift_px):
+        from scipy.ndimage import shift as ndshift
+        db = ndshift(db, shift_px, order=0, mode="constant", cval=np.nan)
     thr = threshold if threshold is not None else water_threshold(db)
     mask = make_mask(db, thr)
     with rasterio.open(prefix + "_mask.tif", "w", driver="GTiff", height=mask.shape[0], width=mask.shape[1],
@@ -87,7 +91,7 @@ def run(hh, hv, prefix, threshold=None, band="HH", kind="grd"):
                        count=1, dtype="float32", crs=CRS, transform=t, nodata=np.nan) as dst:
         dst.write(db.astype("float32"), 1)
     gdf = to_geojson(mask, t, prefix + "_water.geojson")
-    info = {"kind": kind, "band": band, "threshold_db": thr, "water_km2": round(float(gdf.area.sum() / 1e6), 2),
+    info = {"kind": kind, "band": band, "shift_px": list(shift_px), "threshold_db": thr, "water_km2": round(float(gdf.area.sum() / 1e6), 2),
             "valid_km2": round(float((~np.isnan(db)).sum() * RES * RES / 1e6), 1)}
     json.dump(info, open(prefix + "_info.json", "w"), indent=2)
     print(info)
@@ -100,5 +104,6 @@ if __name__ == "__main__":
     ap.add_argument("--threshold", type=float, default=None)
     ap.add_argument("--band", default="HH", choices=["HH", "HV"])
     ap.add_argument("--kind", default="grd", choices=["grd", "ard"])
+    ap.add_argument("--shift-px", default="0,0", help="rows,cols to nudge the scene (Apr 30 GRD: 2,0 = 40 m south)")
     a = ap.parse_args()
-    run(a.hh, a.hv, a.prefix, a.threshold, a.band, a.kind)
+    run(a.hh, a.hv, a.prefix, a.threshold, a.band, a.kind, tuple(float(v) for v in a.shift_px.split(",")))

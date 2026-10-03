@@ -7,7 +7,7 @@ Run on your laptop (needs internet):
     python pipeline/get_ard_baseline.py            # lists scenes
     python pipeline/get_ard_baseline.py 3          # downloads scene #3, cropped to our area
 
-Downloads only area (~65 x 50 km), so files are small (tens of MB).
+Downloads only our area (~65 x 50 km), so files are small (tens of MB).
 Output: data/ard/<date>/<asset>.tif  -> upload those .tif files to Claude.
 """
 import os, sys

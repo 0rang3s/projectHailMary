@@ -8,9 +8,9 @@
     "verified": true,
     "source": "Wikipedia: Fort Albany Airport (CYFA)",
     "status": "red",
-    "dist_flood_m": 161,
+    "dist_flood_m": 199,
     "dist_normal_m": 494,
-    "closer_by_m": 333
+    "closer_by_m": 295
   },
   {
     "id": "k_airstrip",
@@ -21,9 +21,9 @@
     "verified": true,
     "source": "Wikipedia: Kashechewan Airport (CZKE)",
     "status": "yellow",
-    "dist_flood_m": 485,
+    "dist_flood_m": 510,
     "dist_normal_m": 423,
-    "closer_by_m": -62
+    "closer_by_m": -87
   },
   {
     "id": "k_town",
@@ -47,9 +47,9 @@
     "verified": false,
     "source": "approx: mainland south shore + Sinclair/Anderson islands; check OSM",
     "status": "red",
-    "dist_flood_m": 130,
+    "dist_flood_m": 136,
     "dist_normal_m": 194,
-    "closer_by_m": 64
+    "closer_by_m": 58
   },
   {
     "id": "fa_causeway",
@@ -60,8 +60,8 @@
     "verified": false,
     "source": "PLACEHOLDER - find on OSM",
     "status": "red",
-    "dist_flood_m": 103,
+    "dist_flood_m": 63,
     "dist_normal_m": 374,
-    "closer_by_m": 271
+    "closer_by_m": 311
   }
 ]
