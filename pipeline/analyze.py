@@ -56,6 +56,9 @@ def main(normal_p, flood_p, mask_p, lifelines_p, out_dir, mock=False):
     from shapely.geometry import box
     xmin, ymin, xmax, ymax = extra_gdf.total_bounds if len(extra_gdf) else (0, 0, 1, 1)
     extra_gdf["geometry"] = extra_gdf.intersection(box(min(xmin, 0), min(ymin, 0), COAST_X, max(ymax, 1e8)))
+    # Clipping can leave mixed shapes (polygon + line scraps); keep polygons only so maps can draw them.
+    extra_gdf = extra_gdf.explode(index_parts=False)
+    extra_gdf = extra_gdf[extra_gdf.geom_type == "Polygon"]
     extra_gdf = extra_gdf[~extra_gdf.is_empty & (extra_gdf.area > 4000)]
     extra_gdf["area_km2"] = extra_gdf.area / 1e6
     extra_gdf["mock"] = mock
