@@ -36,6 +36,30 @@ streamlit run app/app.py
 
 Use the slider at the top to move between dates. Blue is where water normally is, red is extra water on that date, and the dots are lifelines coloured by how close the water is (red means 200 m or less, yellow means within 1 km).
 
+The Streamlit app stays available as a backup demo. The main interface is the web app below.
+
+## Run the web app
+
+Backend, from the repo root:
+
+```bash
+pip install -r requirements.txt && cp .env.example .env
+```
+
+Add your Groq key to `.env`, then:
+
+```bash
+uvicorn api.main:app --reload
+```
+
+Frontend:
+
+```bash
+cd web && npm install && npm run dev
+```
+
+Open http://localhost:5173. The page talks to the API at http://localhost:8000 through the Vite proxy. API docs are at http://localhost:8000/docs.
+
 ## What's in the repo
 
 - `pipeline/water_mask.py` turns a radar picture into a water map
@@ -43,7 +67,9 @@ Use the slider at the top to move between dates. Blue is where water normally is
 - `pipeline/ice.py` is the ice-jam detector
 - `pipeline/get_ard_baseline.py` downloads RCM pictures from AWS (no ordering needed)
 - `alert/generate_alert.py` writes a short plain-language alert from the numbers
-- `app/app.py` is the web app
+- `api/` is the FastAPI backend (dates, map layers, questions, alerts, situation report)
+- `web/` is the map and chat frontend
+- `app/app.py` is the Streamlit backup demo
 - `data/real/` holds all the processed results
 - `outputs/flood_story.png` is the before/after image for the slides
 - `outputs/ice_jam.png` shows the frozen river on Apr 30 vs open on May 7

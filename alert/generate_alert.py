@@ -6,10 +6,13 @@ The LLM only PHRASES the numbers; it is told to use nothing else.
 
 Usage:
   python alert/generate_alert.py data/mock        # writes data/mock/alert.json
-Needs ANTHROPIC_API_KEY in the environment for the LLM version;
+Needs GROQ_API_KEY in the environment (or a .env file) for the LLM version;
 without it, a template alert is written so the app still works.
+Model comes from LLM_MODEL (default openai/gpt-oss-120b), with
+LLM_FALLBACK_MODEL (default openai/gpt-oss-20b) on failure.
 """
 import json, os, sys
+from pathlib import Path
 
 SYSTEM = (
     "You write flood situation alerts for emergency planners serving remote First Nations "
@@ -47,26 +50,43 @@ def template_alert(stats, lifelines, ice=None):
 
 
 def llm_alert(stats, lifelines, ice=None):
-    import anthropic
-    client = anthropic.Anthropic()
+    from groq import Groq
     data = json.dumps({"stats": stats, "lifelines": lifelines, "river_ice": ice}, indent=2)
-    msg = client.messages.create(
-        model=os.environ.get("ALERT_MODEL", "claude-sonnet-5-5"),
-        max_tokens=300,
-        system=SYSTEM,
-        messages=[{"role": "user", "content": f"Data:\n{data}\n\nWrite the alert."}],
-    )
-    return msg.content[0].text.strip()
+    primary = os.environ.get("LLM_MODEL", "openai/gpt-oss-120b")
+    fallback = os.environ.get("LLM_FALLBACK_MODEL", "openai/gpt-oss-20b")
+    client = Groq(timeout=60.0, max_retries=0)
+    last = None
+    for model in [primary] if primary == fallback else [primary, fallback]:
+        try:
+            msg = client.chat.completions.create(
+                model=model,
+                temperature=0.2,
+                max_tokens=300,
+                messages=[
+                    {"role": "system", "content": SYSTEM},
+                    {"role": "user", "content": f"Data:\n{data}\n\nWrite the alert."},
+                ],
+            )
+            text = (msg.choices[0].message.content or "").strip()
+            if text:
+                return text
+            last = RuntimeError("empty alert")
+        except Exception as exc:
+            last = exc
+            print(f"{model} failed, trying fallback:", exc)
+    raise last
 
 
 def main(data_dir):
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
     stats = json.load(open(f"{data_dir}/stats.json"))
     lifelines = json.load(open(f"{data_dir}/lifelines_status.json"))
     ice_p = f"{data_dir}/ice_stats.json"
     ice = json.load(open(ice_p)) if os.path.exists(ice_p) else None
     source = "template"
     text = template_alert(stats, lifelines, ice)
-    if os.environ.get("ANTHROPIC_API_KEY"):
+    if os.environ.get("GROQ_API_KEY"):
         try:
             text = llm_alert(stats, lifelines, ice); source = "llm"
         except Exception as e:
