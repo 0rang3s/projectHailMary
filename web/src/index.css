@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #020617;
+  color: #e2e8f0;
+}
+
+.map-root .maplibregl-ctrl-bottom-left {
+  bottom: 11.35rem;
+  left: 37.5rem;
+}
+
+.map-root .maplibregl-ctrl-bottom-right {
+  bottom: 11rem;
+  right: 1rem;
+}
+
+.map-root .maplibregl-ctrl-attrib {
+  background: rgba(2, 6, 23, 0.72);
+  color: #cbd5e1;
+}
+
+.map-root .maplibregl-ctrl-attrib a {
+  color: #7dd3fc;
+}
+
+.map-root .maplibregl-ctrl-scale {
+  background: rgba(2, 6, 23, 0.78);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #e2e8f0;
+  font-size: 12px;
+}
+
+.answer p + p {
+  margin-top: 0.45rem;
+}
+
+.answer ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  list-style: disc;
+}
+
+.answer strong {
+  color: white;
+  font-weight: 600;
+}
+

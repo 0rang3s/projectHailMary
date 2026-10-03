@@ -8,6 +8,9 @@ pyproj
 streamlit
 folium
 streamlit-folium
-anthropic
-groq
-python-dotenv
+   anthropic
+   groq
+   fastapi
+   uvicorn
+   python-dotenv
+   pystac-client
