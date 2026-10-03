@@ -979,6 +979,22 @@ def arm_panels():
           const saved = localStorage.getItem(key);
           if (saved) col.style.setProperty('width', saved, 'important');
         }
+        function stretch(grip) {
+          const col = grip && grip.closest('[data-testid="stColumn"]');
+          const zone = grip && (grip.closest('[data-testid="stElementContainer"]') || grip);
+          if (!col || !zone || zone.getAttribute('data-fit')) return;
+          zone.setAttribute('data-fit', '1');
+          function fit() {
+            zone.style.setProperty('height', '0px', 'important');
+            const h = Math.max(col.clientHeight, col.scrollHeight);
+            zone.style.setProperty('height', h + 'px', 'important');
+          }
+          fit();
+          const watch = new ResizeObserver(fit);
+          watch.observe(col);
+          const inner = col.querySelector('[data-testid="stVerticalBlock"]');
+          if (inner) watch.observe(inner);
+        }
         function drag(grip, key, growRight) {
           if (!grip) return;
           const col = grip.closest('[data-testid="stColumn"]');
@@ -1013,6 +1029,8 @@ def arm_panels():
         restore('[data-testid="stColumn"]:has(.drawer-title)', 'cutoff-right');
         drag(doc.querySelector('.grip-right'), 'cutoff-left', true);
         drag(doc.querySelector('.grip-left'), 'cutoff-right', false);
+        stretch(doc.querySelector('.grip-right'));
+        stretch(doc.querySelector('.grip-left'));
         function setGuide(open) {
           doc.body.classList.toggle('guide-shut', !open);
           localStorage.setItem('cutoff-guide', open ? '1' : '0');

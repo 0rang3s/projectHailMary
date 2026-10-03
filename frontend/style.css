@@ -923,9 +923,9 @@ div[data-testid="stColumn"]:has(.panel-left) [data-testid="stElementContainer"]:
 div[data-testid="stColumn"]:has(.drawer-title) [data-testid="stElementContainer"]:has(.grip) {
   position: absolute !important;
   top: 0 !important;
-  bottom: 0 !important;
+  bottom: auto !important;
   width: 18px !important;
-  height: auto !important;
+  height: 100% !important;
   min-height: 0 !important;
   margin: 0 !important;
   padding: 0 !important;
@@ -957,16 +957,14 @@ div[data-testid="stColumn"]:has(.drawer-title) [data-testid="stElementContainer"
 .grip::before {
   content: "";
   position: absolute;
-  top: 10px;
-  bottom: 10px;
+  top: 0;
+  bottom: 0;
   width: 4px;
-  border-radius: 6px;
-  background: #38bdf8;
-  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.22);
+  background: rgba(2, 6, 23, 0.84);
 }
 
-.grip-right::before { right: 6px; }
-.grip-left::before { left: 6px; }
+.grip-right::before { right: 0; }
+.grip-left::before { left: 0; }
 
 .panel-left { display: none; }
 
