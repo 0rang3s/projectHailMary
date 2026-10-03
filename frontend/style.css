@@ -728,6 +728,55 @@ div[data-testid="stSpinner"] {
 
 .chips i.when { background: rgba(56, 189, 248, 0.18); color: #bae6fd; }
 
+.fact-check {
+  margin-top: 8px;
+  font-size: 0.78rem;
+}
+
+.fact-check summary {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 700;
+  list-style: none;
+}
+
+.fact-check summary::-webkit-details-marker { display: none; }
+.fact-check summary::after { content: "  ▾ sources"; font-weight: 600; opacity: 0.75; }
+.fact-check[open] summary::after { content: "  ▴ hide"; }
+
+.fact-check.ok summary { background: rgba(49, 163, 84, 0.22); color: #86efac; }
+.fact-check.warn summary { background: rgba(254, 153, 41, 0.22); color: #fcd34d; }
+
+.fact-check ul {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fact-check li {
+  display: grid;
+  gap: 1px;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border-left: 3px solid #31a354;
+}
+
+.fact-check li.fc-bad { border-left-color: #fe9929; }
+.fact-check li b { color: #f8fafc; }
+.fact-check li span { color: #cbd5e1; }
+.fact-check li em { color: #94a3b8; font-style: normal; font-size: 0.72rem; }
+
+mark.bad-num {
+  background: rgba(254, 153, 41, 0.35);
+  color: #fff;
+  border-radius: 4px;
+  padding: 0 2px;
+}
+
 .alert-copy {
   background: rgba(255, 255, 255, 0.05);
   border-radius: 12px;

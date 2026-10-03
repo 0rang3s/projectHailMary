@@ -47,6 +47,11 @@ try:
     situation_report = llm_mod.situation_report
 except Exception:
     ask_model = ask_with_data = generate_alert = situation_report = None
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+import importlib
+import factcheck
+importlib.reload(factcheck)
 
 # Same distance cutoffs as pipeline/analyze.py.
 RED_M, YELLOW_M = 200, 1000
@@ -880,6 +885,16 @@ def respond(question, scene, scenes, history):
     }
 
 
+@st.cache_data
+def radar_facts(stamp):
+    return factcheck.build_facts(REAL)
+
+
+def facts_stamp():
+    paths = glob.glob(os.path.join(REAL, "*", "*.json"))
+    return max((os.path.getmtime(path) for path in paths), default=0)
+
+
 def remember_answer(question, scene, scenes):
     history = [{"role": item["role"], "content": item["content"]} for item in st.session_state.chat][-8:]
     if history and history[-1]["content"] == question:
@@ -887,12 +902,58 @@ def remember_answer(question, scene, scenes):
     with st.spinner("Reading the radar results…"):
         result = respond(question, scene, scenes, history)
     tools = [tool.get("name", "") for tool in result.get("tools_used") or [] if isinstance(tool, dict)]
+    answer = result.get("answer") or "No answer came back."
+    facts, derived = radar_facts(facts_stamp())
     st.session_state.chat.append({
         "role": "assistant",
-        "content": result.get("answer") or "No answer came back.",
+        "content": answer,
         "tools": tools,
         "dates": result.get("dates_cited") or [],
+        "check": factcheck.check_answer(answer, facts, derived),
     })
+
+
+def marked_answer(text, check):
+    """Answer text with any number that failed the check highlighted."""
+    bad = [item for item in (check or {}).get("items", []) if not item["ok"]]
+    if not bad:
+        return html.escape(text).replace("\n", "<br>")
+    parts, cursor = [], 0
+    for item in sorted(bad, key=lambda entry: entry["start"]):
+        parts.append(html.escape(text[cursor:item["start"]]))
+        parts.append(f"<mark class='bad-num'>{html.escape(text[item['start']:item['end']])}</mark>")
+        cursor = item["end"]
+    parts.append(html.escape(text[cursor:]))
+    return "".join(parts).replace("\n", "<br>")
+
+
+def check_badge(check):
+    if not check or check.get("status") == "none":
+        return ""
+    items = check["items"]
+    if check["status"] == "verified":
+        summary = "✓ Verified against radar data"
+        tone = "ok"
+    else:
+        missing = sum(1 for item in items if not item["ok"])
+        summary = f"⚠️ {missing} number{'s' if missing != 1 else ''} not found in radar data"
+        tone = "warn"
+    rows = []
+    for item in items:
+        how = {"file": "", "setting": " · method setting", "calculated": " · calculated"}.get(item["how"], "")
+        if item["ok"]:
+            rows.append(
+                f"<li class='fc-ok'><b>{html.escape(item['said'])}</b> "
+                f"<span>{html.escape(item['label'])}{html.escape(how)}</span>"
+                f"<em>{html.escape(item['file_value'])} · {html.escape(item['source'])}</em></li>"
+            )
+        else:
+            rows.append(
+                f"<li class='fc-bad'><b>{html.escape(item['said'])}</b> "
+                f"<span>Not found in the radar files</span></li>"
+            )
+    return (f"<details class='fact-check {tone}'><summary>{summary}</summary>"
+            f"<ul>{''.join(rows)}</ul></details>")
 
 
 @st.fragment
@@ -908,18 +969,31 @@ def chat_panel(scene, scenes):
     show("<div class='grip grip-left' title='Drag this edge to widen'></div>")
     show(f"<div class='drawer-title guide-name'><b>Guide</b><span>{html.escape(intro)}</span></div>")
     show("<div class='guide-close'><div class='guide-hide' role='button' tabindex='0'>Close</div></div>")
+    show_checks = st.toggle("Number check on answers", value=True, key="show-checks",
+                            help="Checks every number in Guide's answer against the radar files.")
     if st.session_state.chat:
         bits = ["<div class='thread'>"]
         for message in st.session_state.chat:
             role = message["role"]
-            body = html.escape(message["content"]).replace("\n", "<br>")
             chips = ""
+            badge = ""
             if role == "assistant":
+                check = message.get("check")
+                if check is None:
+                    check = factcheck.check_answer(message["content"], *radar_facts(facts_stamp()))
+                    message["check"] = check
+                if show_checks:
+                    body = marked_answer(message["content"], check)
+                    badge = check_badge(check)
+                else:
+                    body = html.escape(message["content"]).replace("\n", "<br>")
                 chips = "".join(f"<i>{html.escape(name)}</i>" for name in message.get("tools") or [])
                 chips += "".join(f"<i class='when'>{html.escape(date)}</i>" for date in message.get("dates") or [])
                 if chips:
                     chips = f"<div class='chips'>{chips}</div>"
-            bits.append(f"<div class='bubble {role}'>{body}{chips}</div>")
+            else:
+                body = html.escape(message["content"]).replace("\n", "<br>")
+            bits.append(f"<div class='bubble {role}'>{body}{chips}{badge}</div>")
         bits.append("</div>")
         show("".join(bits))
     else:
