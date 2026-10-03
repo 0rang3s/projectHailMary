@@ -51,10 +51,11 @@ The dashboard now opens on a landing page. On the left are saved projects, on th
 To make a new project:
 
 1. Give it a name.
-2. Upload one normal-day image and one or more flood-day images of the same place. Use the `rr.tif` file for AWS analysis-ready data, or `HV.tif` for an EODMS order. The normal day should be a summer day with no flood.
-3. Check the dates in the table and pick which one is the normal day. The dates fill in from the file name or the file itself.
-4. Optional: add lifelines (name, type, lat, lon). Towns should be type `community`, since that's what turns on the ice-jam check.
-5. Click Process images. It takes about 30 seconds to a few minutes, then opens the map.
+2. Pick where the radar comes from:
+   - **Find radar for a place** (easiest): type a place name and hit Find place, click the map, or type lat/lon. Set the box size. Pick a date range for the normal day (summer, no flood) and one for the flood. Hit Search the archive. It lists every RCM scene over that box from the free AWS archive (2025 onward) and pre-ticks the best ones. Untick or change roles if you want.
+   - **Upload my own files**: one normal-day image and one or more flood-day images of the same place. Use the `rr.tif` file for AWS analysis-ready data, or `HV.tif` for an EODMS order. Check the dates in the table and pick the normal day.
+3. Optional: add lifelines (name, type, lat, lon), or upload a CSV. Towns should be type `community`, since that's what turns on the ice-jam check.
+4. Click Download and process (or Process images). It downloads only your box, then takes about 30 seconds to a few minutes and opens the map.
 
 Everything it figures out by itself (the area, the projection, the water cutoff, how much to shift an image to line it up) gets written to `data/projects/<name>/project.json`. You can edit any of it there and hit Run again. You can also run a project without the app: `python pipeline/run_project.py <name>`.
 

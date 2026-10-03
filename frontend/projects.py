@@ -23,6 +23,8 @@ STAGING = os.path.join(PROJECTS, "_staging")
 if os.path.join(ROOT, "pipeline") not in sys.path:
     sys.path.insert(0, os.path.join(ROOT, "pipeline"))
 
+ARCHIVE = "Find radar for a place"
+UPLOAD = "Upload my own files"
 LIFELINE_TYPES = ["community", "airstrip", "road", "bridge", "other"]
 WRONG_BAND = re.compile(r"(^|[_\-.])(rl|rrrl|xc|ch|cv|local_inc_angle|inc|data_mask|mask|hh)([_\-.]|$)", re.I)
 
@@ -47,6 +49,10 @@ LANDING_CSS = """
 .pcard .warn { color: #fbbf24; font-size: .8rem; margin-top: 6px; }
 .pcard .err { color: #fca5a5; font-size: .85rem; margin-top: 6px; }
 .howto { color: #94a3b8; font-size: .88rem; line-height: 1.5; }
+/* The map page pins every map iframe full-screen. Undo that for the small picker map here. */
+[data-testid="stElementContainer"]:has(iframe) { height: auto !important; min-height: 0 !important; overflow: visible !important; }
+iframe[data-testid="stCustomComponentV1"]:not([height="0"]) { position: static !important; inset: auto !important;
+  width: 100% !important; height: 340px !important; z-index: auto !important; border-radius: 12px !important; }
 </style>
 """
 
@@ -229,12 +235,17 @@ def lifelines_from(df):
 
 def new_project_form():
     show("<div class='land-h'>New project</div>")
-    show("""<div class='howto'>Upload one <b>normal-day</b> image and one or more <b>flood-day</b> images of the same place.
-    Works with RCM analysis-ready files from AWS (the <code>rr.tif</code> band) or EODMS GRD orders (the <code>HV.tif</code> file).
-    Pick a summer day with no flood as the normal day. Same pass direction for all images works best.</div>""")
     name = st.text_input("Project name", placeholder="e.g. Red River, spring 2025")
     description = st.text_input("Short description (optional)", placeholder="What happened, where")
-    files = st.file_uploader("Radar images (.tif)", type=["tif", "tiff"], accept_multiple_files=True)
+    source = st.radio("Radar images", [ARCHIVE, UPLOAD], horizontal=True, key="source")
+    files, picks = None, None
+    if source == ARCHIVE:
+        picks = archive_section()
+    else:
+        show("""<div class='howto'>Upload one <b>normal-day</b> image and one or more <b>flood-day</b> images of the same place.
+        Works with RCM analysis-ready files from AWS (the <code>rr.tif</code> band) or EODMS GRD orders (the <code>HV.tif</code> file).
+        Pick a summer day with no flood as the normal day. Same pass direction for all images works best.</div>""")
+        files = st.file_uploader("Radar images (.tif)", type=["tif", "tiff"], accept_multiple_files=True)
 
     rows = stage_uploads(files) if files else []
     table = None
@@ -294,11 +305,17 @@ def new_project_form():
     with st.expander("Advanced (leave empty for automatic)"):
         c1, c2 = st.columns(2)
         res = c1.number_input("Pixel size (m)", min_value=0, value=0, step=10, help="0 = automatic (20 m, larger for big areas)")
-        box = c2.text_input("Area box: west, south, east, north (degrees)", placeholder="-82.40, 52.00, -81.45, 52.45",
-                            help="Empty = wherever all images overlap.")
+        box = "" if source == ARCHIVE else c2.text_input(
+            "Area box: west, south, east, north (degrees)", placeholder="-82.40, 52.00, -81.45, 52.45",
+            help="Empty = wherever all images overlap.")
         coast = c1.number_input("Ignore everything east of this UTM x (m)", min_value=0, value=0, step=1000,
                                 help="For coasts: sea ice and waves are not river. 0 = off.")
 
+    if source == ARCHIVE:
+        if st.button("Download and process", type="primary", disabled=picks is None):
+            process_archive(name, description, picks, lifelines_from(lifeline_df),
+                            {"res_m": int(res) or None, "coast_x": int(coast) or None})
+        return
     if st.button("Process images", type="primary", disabled=table is None):
         problems = []
         if not name.strip():
@@ -341,7 +358,7 @@ def landing():
     show(LANDING_CSS)
     show("""
     <div class="land-top"><div class="brand">CUT OFF</div><div class="sub">Flood &amp; river-ice lifeline maps from RADARSAT radar</div></div>
-    <div class="land-intro">Upload radar images of any place in Canada. Cut Off finds the water, compares each flood day to a
+    <div class="land-intro">Pick any place in Canada (or upload your own radar images). Cut Off finds the water, compares each flood day to a
     normal day, spots river ice and ice-jam patterns, and measures how close the water gets to the places you care about.</div>
     """)
     left, right = st.columns([1.15, 1], gap="large")
@@ -354,3 +371,170 @@ def landing():
             project_card(slug, proj)
     with right:
         new_project_form()
+
+
+# ---------------------------------------------------------------- find radar for a place
+def _set_point(lat, lon):
+    st.session_state.arc_lat, st.session_state.arc_lon = round(lat, 5), round(lon, 5)
+    st.session_state.pop("arc_results", None)
+
+
+def archive_section():
+    """Pick a place + dates, search the RCM archive, tick the scenes to use. Returns the picks or None."""
+    import archive
+    import folium
+    from streamlit_folium import st_folium
+
+    st.session_state.setdefault("arc_lat", 52.24)
+    st.session_state.setdefault("arc_lon", -81.70)
+    st.session_state.setdefault("arc_km", 40)
+    show("""<div class='howto'>Pick a spot: type a place, click the map, or type coordinates. Cut Off searches Canada's
+    free RCM radar archive (2025 onward) for that box, and downloads only that box.</div>""")
+
+    c1, c2 = st.columns([3, 1])
+    place = c1.text_input("Place name", placeholder="e.g. Peguis First Nation, Manitoba", label_visibility="collapsed")
+    if c2.button("Find place", use_container_width=True) and place.strip():
+        try:
+            hit = archive.geocode(place.strip())
+            if hit:
+                _set_point(hit[0], hit[1])
+                st.session_state.arc_place = hit[2]
+                st.rerun()
+            st.warning("No match in Canada. Try a nearby town, or click the map.")
+        except Exception as e:
+            if type(e).__name__ in ("RerunException", "StopException"):
+                raise
+            st.error(f"Couldn't look that up ({e}). Type the coordinates instead.")
+    if st.session_state.get("arc_place"):
+        st.caption(st.session_state.arc_place)
+
+    lat, lon, km = st.session_state.arc_lat, st.session_state.arc_lon, st.session_state.arc_km
+    bbox = archive.box_around(lat, lon, km)
+    m = folium.Map(location=[lat, lon], zoom_start=max(5, min(12, int(round(10 - math.log2(max(km, 5) / 20))))),
+                   tiles="OpenStreetMap")
+    folium.Rectangle([[bbox[1], bbox[0]], [bbox[3], bbox[2]]], color="#38bdf8", weight=2, fill=True,
+                     fill_opacity=0.08).add_to(m)
+    folium.Marker([lat, lon]).add_to(m)
+    got = st_folium(m, height=340, use_container_width=True, returned_objects=["last_clicked"], key="arc-map")
+    click = (got or {}).get("last_clicked")
+    if click and click != st.session_state.get("arc_last_click"):
+        st.session_state.arc_last_click = click
+        _set_point(click["lat"], click["lng"])
+        st.session_state.pop("arc_place", None)
+        st.rerun()
+
+    c1, c2, c3 = st.columns(3)
+    c1.number_input("Latitude", min_value=41.0, max_value=84.0, step=0.01, format="%.5f", key="arc_lat")
+    c2.number_input("Longitude", min_value=-141.0, max_value=-52.0, step=0.01, format="%.5f", key="arc_lon")
+    c3.slider("Box size (km)", 10, 100, step=5, key="arc_km")
+    st.caption(f"Box: {bbox[0]}, {bbox[1]}, {bbox[2]}, {bbox[3]} (west, south, east, north)")
+
+    c1, c2 = st.columns(2)
+    normal_win = c1.date_input("Normal day: search between", (date(2025, 7, 1), date(2025, 9, 30)),
+                               min_value=date(2025, 1, 1), key="arc_normal_win",
+                               help="Summer or fall, no flood, no snow.")
+    flood_win = c2.date_input("Flood days: search between", (date(2025, 4, 15), date(2025, 5, 31)),
+                              min_value=date(2025, 1, 1), key="arc_flood_win")
+
+    if st.button("Search the archive", use_container_width=True):
+        if len(normal_win) != 2 or len(flood_win) != 2:
+            st.error("Pick a start and an end date for both searches.")
+        else:
+            try:
+                with st.spinner("Searching the RCM archive…"):
+                    normal = archive.search(bbox, normal_win[0].isoformat(), normal_win[1].isoformat())
+                    flood = archive.search(bbox, flood_win[0].isoformat(), flood_win[1].isoformat())
+                st.session_state.arc_results = {"bbox": list(bbox), "normal": normal, "flood": flood}
+            except Exception as e:
+                st.error(f"Search failed: {e}")
+
+    res = st.session_state.get("arc_results")
+    if not res:
+        return None
+    if list(res["bbox"]) != list(bbox):
+        st.info("You moved the box. Search again to update the list.")
+        return None
+    if not res["normal"] or not res["flood"]:
+        which = "normal-day" if not res["normal"] else "flood-day"
+        st.warning(f"No {which} scenes cover this box in those dates. Try wider dates (the archive starts in 2025).")
+        return None
+
+    # Pre-pick: the best-covering normal scene (ascending if possible), then flood scenes from the same
+    # pass direction that cover most of the box. The user can change any of it.
+    def score(sc):
+        return (sc["coverage"] >= 90, sc["orbit"] == "ascending", sc["coverage"])
+    best = max(res["normal"], key=score)
+    floods = [sc for sc in res["flood"] if sc["coverage"] >= 90 and sc["orbit"] == best["orbit"]][:4]
+    rows = []
+    for role, scenes in (("normal", res["normal"]), ("flood", res["flood"])):
+        for sc in scenes:
+            rows.append({"use": sc is best or sc in floods, "role": role, "when (UTC)": sc["when"],
+                         "pass": sc["orbit"], "covers %": sc["coverage"], "id": sc["id"]})
+    show(f"<div class='howto'>Found {len(res['normal'])} normal-day and {len(res['flood'])} flood-day scenes. "
+         "Tick one normal day and the flood days you want. Pick scenes that cover more than 90% of the box, "
+         "with the same pass for all of them.</div>")
+    table = st.data_editor(
+        pd.DataFrame(rows), hide_index=True, use_container_width=True, key=f"arc-table-{len(rows)}",
+        disabled=["when (UTC)", "pass", "covers %", "id"], column_order=["use", "role", "when (UTC)", "pass", "covers %"],
+        column_config={
+            "use": st.column_config.CheckboxColumn("Use"),
+            "role": st.column_config.SelectboxColumn("Role", options=["normal", "flood"], required=True),
+            "covers %": st.column_config.ProgressColumn("Covers box", min_value=0, max_value=100, format="%.0f%%"),
+        })
+    by_id = {sc["id"]: sc for sc in res["normal"] + res["flood"]}
+    return {"bbox": res["bbox"], "picks": [{**by_id[r["id"]], "role": r["role"]}
+                                           for r in table.to_dict("records") if r["use"]]}
+
+
+def process_archive(name, description, picks, lifelines, advanced):
+    import archive
+    chosen = picks["picks"]
+    problems = []
+    if not name.strip():
+        problems.append("Give the project a name.")
+    if sum(sc["role"] == "normal" for sc in chosen) != 1:
+        problems.append("Tick exactly one normal-day scene.")
+    if not any(sc["role"] == "flood" for sc in chosen):
+        problems.append("Tick at least one flood-day scene.")
+    dates = [sc["date"] for sc in chosen]
+    if len(set(dates)) != len(dates):
+        problems.append("Two ticked scenes are on the same day. Keep the one that covers more.")
+    if len({sc["orbit"] for sc in chosen}) > 1:
+        st.warning("You mixed ascending and descending passes. It will run, but the water edges may not line up as well.")
+    if problems:
+        for p in problems:
+            st.error(p)
+        return
+    slug = slugify(name.strip())
+    pdir = os.path.join(PROJECTS, slug)
+    os.makedirs(os.path.join(pdir, "inputs"))
+    images = []
+    with st.status("Downloading radar…", expanded=True) as box:
+        try:
+            for sc in sorted(chosen, key=lambda x: x["date"]):
+                rel = f"inputs/{sc['date']}.tif"
+                box.write(f"Downloading {sc['date']} ({sc['role']})…")
+                filled = archive.download(sc, picks["bbox"], os.path.join(pdir, rel))
+                if filled < 0.5:
+                    st.warning(f"{sc['date']} only has data over {filled:.0%} of the box.")
+                images.append({"date": sc["date"], "role": sc["role"], "file": rel, "scene_id": sc["id"]})
+            box.update(label="Downloaded", state="complete")
+        except Exception as e:
+            box.update(label="Download failed", state="error")
+            st.error(f"Download failed: {e}")
+            shutil.rmtree(pdir, ignore_errors=True)
+            return
+    proj = {"name": name.strip(), "description": description or "", "source": "RCM ARD archive (AWS)",
+            "created": datetime.now().isoformat(timespec="seconds"), "status": "new",
+            "aoi_lonlat": picks["bbox"], "images": images}
+    proj.update({k: v for k, v in advanced.items() if v not in (None, "", [])})
+    with open(os.path.join(pdir, "project.json"), "w", encoding="utf-8") as f:
+        json.dump(proj, f, indent=2)
+    with open(os.path.join(pdir, "lifelines.json"), "w", encoding="utf-8") as f:
+        json.dump(lifelines, f, indent=2)
+    st.session_state.pop("arc_results", None)
+    proj = run_with_status(slug, "Processing… (about 30 s to a few minutes)")
+    if proj.get("status") == "done":
+        open_project(slug)
+    else:
+        st.error(f"{proj.get('error')}  The project is saved on the left, so you can fix it and run again.")

@@ -168,6 +168,8 @@ def _run(slug, pdir, proj, log):
                                     "so extra water may be too high. The river-ice check still works.")
 
     # 2. water map for every image
+    seen = {}
+
     def make(im, shift=(0, 0)):
         role = "normal" if im["role"] == "normal" else "flood"
         prefix = os.path.join(pdir, f"{role}_{im['date']}")
@@ -177,6 +179,12 @@ def _run(slug, pdir, proj, log):
         if any(shift):
             from scipy.ndimage import shift as ndshift
             db = ndshift(db, shift, order=0, mode="constant", cval=np.nan)
+        if role == "normal":
+            seen["normal"] = np.isfinite(db)
+        elif "normal" in seen:
+            # Only compare where the normal day has data too. Otherwise normal river the normal
+            # image didn't cover would count as "extra" water.
+            db[~seen["normal"]] = np.nan
         if im.get("threshold_db") is None:
             im["threshold_db"] = round(water_mask.auto_threshold(db, im["kind"]), 2)
         mask = water_mask.make_mask(db, im["threshold_db"])
