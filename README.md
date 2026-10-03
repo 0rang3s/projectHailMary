@@ -19,13 +19,15 @@ We also built an ice-jam detector. Ice jams are what actually cause these floods
 - May 19, 2025: water draining (same source)
 - Aug 7, 2025: our normal day (same source)
 
-The free AWS archive only starts in spring 2025, so our normal day is the summer after the flood, not before it.
+The free AWS archive only starts in 2025 (we checked year by year, nothing for 2019–2024 anywhere in Canada), so our normal day is the summer after the flood, not before it.
+
+We also grabbed Apr 1, 2025 (same satellite pass as May 7, May 19 and Aug 7). It's an ice-only reference date: the river is frozen everywhere, upstream too, so no jam. We don't compute flood numbers for it because in early April wet snow and frozen bogs look dark on radar and get mistaken for water. Those same dark patches show up on Apr 30, which tells us most of the Apr 30 red patches away from the river aren't flood. There's also a gap in the archive over our area from Apr 8 to May 6, right during breakup, so Apr 30 only exists because of our EODMS order.
 
 ## What we found
 
 Extra water compared to normal, along the river, was about 66.5 km² on Apr 30, 20.7 km² on May 7 and 13.0 km² on May 19. We leave out the James Bay shoreline east of the river mouth, because the tidal flats and breaking sea ice there aren't river flooding (with the shore included it was 67.0 km² on May 7 and 20.1 km² on May 19, and both numbers are saved in `stats.json`). Apr 30 is a different, uncalibrated product and a lot of the river was hidden under ice, so don't compare it straight against the May numbers. On the emergency night, water got within roughly 60–200 m of Fort Albany's airstrip and causeway area, when normally it's 370–490 m away. That lines up with the news saying the causeway was less than a foot from overflowing.
 
-The ice result is the big one. On Apr 30 the river was 97–99% frozen within 5 km of both towns while only about 11% frozen upstream, which is the classic ice-jam setup. By May 7 it was fully open at Fort Albany and only 30% frozen at Kashechewan, and by May 19 it was basically all open. We tested different cutoffs and smoothing and the near-town number stays at 93–100% no matter what, so it's not a fluke of one setting.
+The ice result is the big one (see `outputs/ice_timeline.png`). On Apr 1 the river was 97–99% frozen everywhere, upstream too. On Apr 30 the river was 97–99% frozen within 5 km of both towns while only about 11% frozen upstream, which is the classic ice-jam setup. By May 7 it was fully open at Fort Albany and only 30% frozen at Kashechewan, and by May 19 it was basically all open. We tested different cutoffs and smoothing and the near-town number stays at 93–100% no matter what, so it's not a fluke of one setting.
 
 ## Run it
 
@@ -77,6 +79,7 @@ Open http://localhost:5173. The page talks to the API at http://localhost:8000 t
 - `data/real/` holds all the processed results
 - `outputs/flood_story.png` is the before/after image for the slides
 - `outputs/ice_jam.png` shows the frozen river on Apr 30 vs open on May 7
+- `outputs/ice_timeline.png` shows the whole breakup: Apr 1, Apr 30, May 7, May 19
 
 The raw radar files aren't in the repo because they're too big. Run `get_ard_baseline.py` to grab them again.
 
