@@ -23,6 +23,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 import folium
+from folium.template import Template
 import streamlit.components.v1 as components
 from streamlit_folium import st_folium
 
@@ -50,12 +51,6 @@ except Exception:
 # Same distance cutoffs as pipeline/analyze.py.
 RED_M, YELLOW_M = 200, 1000
 
-PHASE = {
-    "2025-04-30": ("Emergency", "#d7301f"),
-    "2025-05-07": ("River opening", "#e06a12"),
-    "2025-05-19": ("Water receding", "#c48a12"),
-    "2025-08-07": ("Normal baseline", "#2f6fad"),
-}
 EXPOSURE = {
     "red": "HIGH EXPOSURE",
     "yellow": "ELEVATED",
@@ -144,6 +139,14 @@ def short_date(iso):
     return f"{months[dt.month - 1].upper()} {dt.day}"
 
 
+def label_for(iso, dates):
+    """Slider and chart label. Adds the year when two samples share a month and day."""
+    text = short_date(iso)
+    if any(other != iso and other[5:10] == iso[5:10] for other in dates):
+        text = f"{text} {iso[:4]}"
+    return text
+
+
 def long_date(iso):
     dt = datetime.strptime(iso, "%Y-%m-%d")
     months = "January February March April May June July August September October November December".split()
@@ -177,12 +180,12 @@ def status_for(dist_m):
     return "green"
 
 
-def phase_of(date, normal_date):
-    if date in PHASE:
-        return PHASE[date]
-    if date == normal_date:
+def phase_of(scene, normal_date):
+    if scene.get("baseline") or scene["date"] == normal_date:
         return ("Normal baseline", "#2f6fad")
-    return ("Flood date", "#5c6b7a")
+    if (scene.get("ice") or {}).get("jam_risk"):
+        return ("Ice-jam pattern", "#d7301f")
+    return ("Flood date", "#e06a12")
 
 
 def near_vals(ice):
@@ -395,7 +398,41 @@ def add_water(m, data, name, style, show_layer=True):
     folium.GeoJson(data, name=name, show=show_layer, style_function=lambda f, style=style: style).add_to(m)
 
 
-def fit_screen(m):
+class PinLayers(folium.MacroElement):
+    """Keep the basemap list open after a click, instead of closing when the pointer leaves."""
+
+    _template = Template("{% macro script(this, kwargs) %}\n{{ this.code }}\n{% endmacro %}")
+
+    def __init__(self):
+        super().__init__()
+        self._name = "PinLayers"
+        self.code = """
+        (function () {
+          var box = document.querySelector('.leaflet-control-layers');
+          if (!box || box.getAttribute('data-pin')) return;
+          box.setAttribute('data-pin', '1');
+          box.setAttribute('data-open', '0');
+          var link = box.querySelector('.leaflet-control-layers-toggle');
+          if (link) {
+            link.addEventListener('click', function (e) {
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              var open = box.getAttribute('data-open') === '1';
+              box.setAttribute('data-open', open ? '0' : '1');
+              box.classList.toggle('leaflet-control-layers-expanded', !open);
+            }, true);
+          }
+          new MutationObserver(function () {
+            var want = box.getAttribute('data-open') === '1';
+            var has = box.classList.contains('leaflet-control-layers-expanded');
+            if (want && !has) box.classList.add('leaflet-control-layers-expanded');
+            if (!want && has) box.classList.remove('leaflet-control-layers-expanded');
+          }).observe(box, { attributes: true, attributeFilter: ['class'] });
+        })();
+        """
+
+
+def fit_screen(m, date_count):
     # The map iframe is stretched to the window. This makes the drawing inside fill it,
     # and lets the side panels be dragged wider from their edges.
     m.get_root().html.add_child(folium.Element("""
@@ -407,6 +444,61 @@ def fit_screen(m):
       .float-container,
       .float-child,
       .leaflet-container { height: 100% !important; width: 100% !important; }
+      /* Sit beside the date slider instead of under the corner panels. */
+      .leaflet-top.leaflet-left {
+        top: 18px !important;
+        left: max(300px, calc(50% - DOCK_HALF - 78px)) !important;
+        right: auto !important;
+      }
+      .leaflet-top.leaflet-right {
+        top: 22px !important;
+        left: auto !important;
+        right: calc(50% - DOCK_HALF - 68px) !important;
+      }
+      .leaflet-top.leaflet-right .leaflet-control-layers-expanded {
+        background: transparent;
+        border: none;
+        box-shadow: none;
+        color: #0f172a;
+      }
+      .leaflet-control-layers-expanded .leaflet-control-layers-toggle {
+        display: block !important;
+      }
+      .leaflet-top.leaflet-right .leaflet-control-layers-expanded::after {
+        content: "";
+        position: absolute;
+        top: 100%;
+        right: 0;
+        width: 240px;
+        height: 12px;
+      }
+      .leaflet-control-layers-expanded .leaflet-control-layers-list {
+        position: absolute;
+        top: calc(100% + 8px);
+        right: 0;
+        width: max-content;
+        background: #fff;
+        border-radius: 10px;
+        padding: 6px 10px 6px 6px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+      }
+      .leaflet-control-zoom.leaflet-bar {
+        display: flex;
+        border: none;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+      }
+      .leaflet-control-zoom.leaflet-bar a {
+        width: 32px;
+        height: 32px;
+        line-height: 32px;
+        border-bottom: 1px solid rgba(15, 23, 42, 0.12);
+      }
+      .leaflet-control-zoom.leaflet-bar a:first-child { border-radius: 10px 0 0 10px; }
+      .leaflet-control-zoom.leaflet-bar a:last-child { border-radius: 0 10px 10px 0; }
+      .leaflet-control-layers {
+        border-radius: 10px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+      }
     </style>
     <script>
     (function () {
@@ -425,10 +517,10 @@ def fit_screen(m):
     })();
     </script>
     {% endraw %}
-    """))
+    """.replace("DOCK_HALF", f"min((100vw - 620px) / 2, max(240px, {max(date_count, 1) * 48}px))")))
 
 
-def build_map(scene, normal_path, normal_date, selected_id, center, zoom):
+def build_map(scene, normal_path, normal_date, selected_id, center, zoom, date_count):
     chosen = next((line for line in scene["lifelines"] if line["id"] == selected_id), None)
     m = folium.Map(location=center, zoom_start=zoom, tiles=None)
     if chosen:
@@ -480,7 +572,9 @@ def build_map(scene, normal_path, normal_date, selected_id, center, zoom):
                 ),
             ).add_to(m)
     folium.LayerControl(collapsed=True).add_to(m)
-    fit_screen(m)
+    # The layers button stays open on click. Hover was closing it before a choice could be made.
+    PinLayers().add_to(m)
+    fit_screen(m, date_count)
     return m
 
 
@@ -500,7 +594,7 @@ def summary_card(scene):
             tag, tone = "ICE-JAM PATTERN", "danger"
             sentence = "River conditions show substantially greater ice coverage near the communities than upstream."
         else:
-            tag, tone = PHASE.get(scene["date"], ("Flood date", ""))[0].upper(), "warn"
+            tag, tone = phase_of(scene, scene["stats"].get("normal_date", scene["date"]))[0].upper(), "warn"
             sentence = "No ice-jam pattern is flagged for this date." if ice else "River ice was not measured for this scene."
         metrics = [(f"{km(stats['extra_water_km2'])} km²", "Additional water")]
         if ice:
@@ -511,7 +605,7 @@ def summary_card(scene):
         if stats.get("flood_water_km2", 0) < stats.get("normal_water_km2", 0):
             caption += " Ice-covered channel is mapped as ice, not as open water."
 
-    accent = phase_of(scene["date"], scene["stats"].get("normal_date", scene["date"]))[1]
+    accent = phase_of(scene, scene["stats"].get("normal_date", scene["date"]))[1]
     blocks = "".join(
         f"<div class='metric' style='animation-delay:{i * 0.06:.2f}s'><b>{html.escape(value)}</b><span>{html.escape(label)}</span></div>"
         for i, (value, label) in enumerate(metrics)
@@ -590,7 +684,9 @@ def finish_chart(figure):
 
 
 def draw_charts(scenes, selected, height=240):
-    order = [short_date(scene["date"]) for scene in scenes]
+    dates = [scene["date"] for scene in scenes]
+    order = [label_for(scene["date"], dates) for scene in scenes]
+    angle = 0 if len(order) <= 6 else -35
     water = pd.DataFrame({
         "label": order,
         "km2": [scene["stats"]["extra_water_km2"] for scene in scenes],
@@ -600,9 +696,9 @@ def draw_charts(scenes, selected, height=240):
         alt.Chart(water)
         .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4, cursor="pointer")
         .encode(
-            x=alt.X("label:N", sort=order, title=None),
+            x=alt.X("label:N", sort=order, title=None, axis=alt.Axis(labelAngle=angle)),
             y=alt.Y("km2:Q", title="km²"),
-            color=alt.condition(alt.datum.label == short_date(selected), alt.value("#d7301f"), alt.value("#e7b2aa")),
+            color=alt.condition(alt.datum.label == label_for(selected, dates), alt.value("#d7301f"), alt.value("#e7b2aa")),
             tooltip=[alt.Tooltip("label:N", title="Date"), alt.Tooltip("km2:Q", title="Additional water (km²)", format=".1f")],
         )
         .add_params(pick)
@@ -616,22 +712,27 @@ def draw_charts(scenes, selected, height=240):
         for name, pct in ice_rows(scene["ice"]):
             if name == "Upstream" or pct is None:
                 continue
-            ice_rows_long.append({"label": short_date(scene["date"]), "place": name, "pct": pct})
+            ice_rows_long.append({"label": label_for(scene["date"], dates), "place": name, "pct": pct})
     ice_df = pd.DataFrame(ice_rows_long)
     ice_chart = None
     if len(ice_df):
         labels = list(dict.fromkeys(ice_df["label"]))
-        opacity = (alt.condition(alt.datum.label == short_date(selected), alt.value(1), alt.value(0.4))
-                   if short_date(selected) in labels else alt.value(1))
+        opacity = (alt.condition(alt.datum.label == label_for(selected, dates), alt.value(1), alt.value(0.4))
+                   if label_for(selected, dates) in labels else alt.value(1))
+        places = list(dict.fromkeys(ice_df["place"]))
+        ice_palette = ["#7dd3fc", "#38bdf8", "#0284c7", "#0369a1", "#bae6fd", "#0ea5e9"]
         ice_chart = finish_chart(
             alt.Chart(ice_df)
             .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
             .encode(
-                x=alt.X("label:N", sort=labels, title=None),
+                x=alt.X("label:N", sort=labels, title=None, axis=alt.Axis(labelAngle=angle)),
                 xOffset="place:N",
                 y=alt.Y("pct:Q", title="Percent frozen", scale=alt.Scale(domain=[0, 100])),
-                color=alt.Color("place:N", scale=alt.Scale(range=["#7dd3fc", "#38bdf8"]),
-                                legend=alt.Legend(orient="top", title=None)),
+                color=alt.Color(
+                    "place:N",
+                    scale=alt.Scale(domain=places, range=[ice_palette[i % len(ice_palette)] for i in range(len(places))]),
+                    legend=alt.Legend(orient="top", title=None),
+                ),
                 opacity=opacity,
                 tooltip=["label", "place", alt.Tooltip("pct:Q", title="Frozen (%)", format=".0f")],
             )
@@ -691,7 +792,7 @@ def metric_strip(scene):
 
 
 def story_line(scene, normal_date):
-    label, color = phase_of(scene["date"], normal_date)
+    label, color = phase_of(scene, normal_date)
     stats = scene["stats"]
     near = closest(scene["lifelines"])
     top = near[0] if near else None
@@ -837,7 +938,8 @@ def chat_panel(scene, scenes):
     picked = st.radio("Audience", labels, horizontal=True, label_visibility="collapsed", key="audience-label")
     audience = next(key for key, label in AUDIENCES if label == picked)
     if scene["baseline"]:
-        show("<p class='note'>Pick a flood date for an alert. August 7 is the normal river.</p>")
+        normal = next((item["date"] for item in scenes if item["baseline"]), "")
+        show(f"<p class='note'>Pick a flood date for an alert. {html.escape(long_date(normal))} is the normal river.</p>")
     elif generate_alert is None:
         alert = scene.get("alert") or {}
         if alert.get("text"):
@@ -936,11 +1038,11 @@ def arm_panels():
     )
 
 
-def show_map(scene, normal_path, normal_date):
+def show_map(scene, normal_path, normal_date, date_count):
     with st.spinner("Loading the map…"):
         fmap = build_map(
             scene, normal_path, normal_date, st.session_state.lifeline,
-            st.session_state.map_center, st.session_state.map_zoom,
+            st.session_state.map_center, st.session_state.map_zoom, date_count,
         )
         st_folium(
             fmap, height=900, use_container_width=True, returned_objects=[],
@@ -986,26 +1088,33 @@ def main():
     st.session_state.setdefault("chat", [])
     st.session_state.setdefault("alerts", {})
 
-    show("""
+    years = sorted({date[:4] for date in timeline})
+    year_span = years[0] if len(years) == 1 else f"{years[0]}–{years[-1]}"
+    show(f"""
+    <style>
+    div[data-testid="stHorizontalBlock"]:has(.date-dock) {{
+      width: min(calc(100vw - 620px), max(480px, {len(timeline) * 96}px)) !important;
+    }}
+    </style>
     <div class="top">
       <div>
         <div class="brand">CUT OFF</div>
         <div class="title">Albany River</div>
       </div>
-      <div class="badge">RCM · Spring 2025</div>
+      <div class="badge">RCM · {html.escape(year_span)}</div>
     </div>
     """)
 
     scene = next(item for item in scenes if item["date"] == st.session_state.date)
     phase_label, accent, headline, detail = story_line(scene, normal_date)
     live = html.escape(phase_label.upper())
-    labels = [short_date(date) for date in timeline]
+    labels = [label_for(date, timeline) for date in timeline]
     label_to_date = dict(zip(labels, timeline))
     synced = st.session_state.pop("sync_slider", None)
     if synced in label_to_date:
         st.session_state.date_label = synced
     elif "date_label" not in st.session_state or st.session_state.date_label not in label_to_date:
-        st.session_state.date_label = short_date(st.session_state.date)
+        st.session_state.date_label = label_for(st.session_state.date, timeline)
 
     dock = columns([1])
     with dock[0]:
@@ -1052,16 +1161,16 @@ def main():
         show("<div class='h'>Across the spring</div>")
         show("<p class='guide'>Click a bar to open that day.</p>")
         picked = draw_charts(scenes, scene["date"], height=180)
-        by_label = {short_date(item["date"]): item["date"] for item in scenes}
+        by_label = {label_for(item["date"], timeline): item["date"] for item in scenes}
         if picked in by_label and by_label[picked] != st.session_state.date:
             st.session_state.date = by_label[picked]
             st.session_state.sync_slider = picked
             st.rerun()
-        show("<p class='note'>April 30 is a different radar product. Ice-covered river is not counted as open water. August 7 is the summer comparison.</p>")
+        show(f"<p class='note'>Flood dates are measured against the normal water on {html.escape(long_date(normal_date))}. Ice-covered river is not counted as open water.</p>")
     with chat_col:
         chat_panel(scene, scenes)
 
-    show_map(scene, normal_path, normal_date)
+    show_map(scene, normal_path, normal_date, len(timeline))
     arm_panels()
 
 

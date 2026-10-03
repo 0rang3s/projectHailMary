@@ -640,6 +640,10 @@ div[data-testid="stTextInput"] input {
   border-color: rgba(255, 255, 255, 0.12);
 }
 
+[data-testid="stForm"] [data-testid="InputInstructions"] {
+  display: none !important;
+}
+
 div[data-testid="stColumn"]:has(.drawer-title) {
   background: rgba(15, 23, 42, 0.78);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -805,10 +809,18 @@ div[data-testid="stHorizontalBlock"]:has(.date-dock) {
 .ticks {
   display: flex;
   justify-content: space-between;
+  gap: 6px;
   margin: 0 2px -2px;
   color: #cbd5e1;
   font-size: 0.72rem;
   font-weight: 700;
+}
+
+.ticks span {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  white-space: nowrap;
 }
 
 div[data-testid="stHorizontalBlock"]:has(.date-dock) [data-testid="stSliderThumbValue"] p,
