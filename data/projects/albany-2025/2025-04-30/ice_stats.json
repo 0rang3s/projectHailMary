@@ -1,0 +1,21 @@
+{
+  "river_km2_seen": 28.9,
+  "pct_frozen_overall": 27,
+  "near_towns": {
+    "Kashechewan (community)": {
+      "river_km2_seen": 1.67,
+      "pct_frozen": 99
+    },
+    "Fort Albany (community)": {
+      "river_km2_seen": 2.02,
+      "pct_frozen": 97
+    }
+  },
+  "upstream_pct_frozen": 11,
+  "jam_risk": true,
+  "jam_towns": [
+    "Kashechewan (community)",
+    "Fort Albany (community)"
+  ],
+  "rule": "jam risk = river within 5 km of a town >= 70% frozen while river > 15 km away <= 40% frozen"
+}

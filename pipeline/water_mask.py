@@ -32,6 +32,38 @@ RES = float(os.environ.get("CUTOFF_RES", 20))   # metres; 20 = native ARD pixel 
 XMIN, YMIN, XMAX, YMAX = 405000, 5762000, 470000, 5812000
 
 
+def configure(crs=None, bounds=None, res=None):
+    """Point the module at another area (used by run_project.py). bounds = (xmin, ymin, xmax, ymax) in crs metres."""
+    global CRS, XMIN, YMIN, XMAX, YMAX, RES
+    if crs: CRS = crs
+    if bounds: XMIN, YMIN, XMAX, YMAX = bounds
+    if res: RES = float(res)
+
+
+def kittler_threshold(db, bins=256):
+    """Minimum-error (Kittler-Illingworth) cutoff on the whole scene. Copes with 'a little water, lots of land'.
+    Checked on Albany Apr 30 GRD: 47.7 vs 47.5 picked by hand."""
+    v = db[np.isfinite(db)]
+    lo, hi = np.percentile(v, [0.5, 99.5])
+    h, e = np.histogram(v[(v >= lo) & (v <= hi)], bins=bins)
+    c = (e[:-1] + e[1:]) / 2; h = h.astype(float) / h.sum()
+    best, cut = np.inf, None
+    for i in range(5, bins - 5):
+        p1 = h[:i].sum(); p2 = 1 - p1
+        if p1 < 1e-4 or p2 < 1e-4: continue
+        m1 = (h[:i] * c[:i]).sum() / p1; m2 = (h[i:] * c[i:]).sum() / p2
+        s1 = np.sqrt((h[:i] * (c[:i] - m1) ** 2).sum() / p1); s2 = np.sqrt((h[i:] * (c[i:] - m2) ** 2).sum() / p2)
+        if s1 <= 0 or s2 <= 0: continue
+        J = 1 + 2 * (p1 * np.log(s1) + p2 * np.log(s2)) - 2 * (p1 * np.log(p1) + p2 * np.log(p2))
+        if J < best: best, cut = J, c[i]
+    return float(cut) if cut is not None else float(threshold_otsu(v))
+
+
+def auto_threshold(db, kind):
+    """Calibrated ARD: -20 dB (consistent on every 2025 Albany date). Raw GRD: Kittler-Illingworth."""
+    return -20.0 if kind == "ard" else kittler_threshold(db)
+
+
 def load_db(path, kind="grd"):
     """Read one band, warp to the AOI grid, return dB.
     kind="grd": EODMS Level-1 GRD (raw DN, located by GCPs)  -> dB of DN^2 (uncalibrated)

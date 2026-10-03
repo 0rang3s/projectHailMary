@@ -1,0 +1,13 @@
+{
+  "mock": false,
+  "normal_date": "2025-08-07",
+  "flood_date": "2025-05-07",
+  "normal_water_km2": 146.5,
+  "flood_water_km2": 186.1,
+  "extra_water_km2": 20.7,
+  "extra_water_incl_coast_km2": 67.0,
+  "notes": "extra water excludes James Bay east of the coast line; lifeline distances count open water, river ice and the normal channel",
+  "lifelines_red": 1,
+  "lifelines_yellow": 4,
+  "lifelines_no_data": 0
+}

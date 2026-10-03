@@ -44,6 +44,27 @@ Use the slider at the top to move between dates. Blue is where water normally is
 
 The Streamlit app stays available as a backup demo. The main interface is the web app below.
 
+## Upload your own radar images
+
+The dashboard now opens on a landing page. On the left are saved projects, on the right you make a new one. Albany is saved project #1, so clicking Open map on it gives the same results as before.
+
+To make a new project:
+
+1. Give it a name.
+2. Upload one normal-day image and one or more flood-day images of the same place. Use the `rr.tif` file for AWS analysis-ready data, or `HV.tif` for an EODMS order. The normal day should be a summer day with no flood.
+3. Check the dates in the table and pick which one is the normal day. The dates fill in from the file name or the file itself.
+4. Optional: add lifelines (name, type, lat, lon). Towns should be type `community`, since that's what turns on the ice-jam check.
+5. Click Process images. It takes about 30 seconds to a few minutes, then opens the map.
+
+Everything it figures out by itself (the area, the projection, the water cutoff, how much to shift an image to line it up) gets written to `data/projects/<name>/project.json`. You can edit any of it there and hit Run again. You can also run a project without the app: `python pipeline/run_project.py <name>`.
+
+Things to know:
+
+- The raw radar files and the big `.tif` files aren't in git. So a saved project opens fine from its results, but Run again only works on the computer that has the inputs.
+- Images from Nov to Apr get a snow warning. Wet snow looks like water, so extra water can come out too high. The ice check still works.
+- With no towns in the lifelines there's no jam check, just how much of the river is frozen.
+- The Albany project has its cutoffs set by hand (checked against the news). A fully automatic run on the same files lands close, but not exact: about 41 km² extra water on Apr 30 instead of 66.5, and the same ice-jam result.
+
 ## Run the web app
 
 Backend, from the repo root:
