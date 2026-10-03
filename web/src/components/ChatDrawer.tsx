@@ -2,13 +2,18 @@ import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { askQuestion, getAudienceAlert, getReport } from '../api'
 import { shortDate } from '../format'
-import type { Audience, AudienceAlert, ToolUse } from '../types'
+import type { Audience, AudienceAlert, InferResponse, ToolUse } from '../types'
+import InferAnswer from './InferAnswer'
 
 const SUGGESTED = [
-  'How close did water get to the Fort Albany airstrip?',
-  'Was there an ice jam on May 7?',
+  'Which lifeline is in the most trouble?',
   'What changed between Apr 30 and May 19?',
+  'Is the Fort Albany airstrip getting better or worse?',
 ]
+
+// While testing, keep this false: with no history, repeated questions are answered from the
+// server cache. Set it to true if you want follow-up questions to remember earlier turns.
+const SEND_HISTORY = false
 
 const AUDIENCES: { id: Audience; label: string }[] = [
   { id: 'coordinator', label: 'Coordinator' },
@@ -22,6 +27,7 @@ interface Message {
   content: string
   tools?: ToolUse[]
   dates?: string[]
+  data?: InferResponse
   pending?: boolean
 }
 
@@ -83,9 +89,11 @@ export default function ChatDrawer({ open, selected, onClose }: Props) {
   async function send(question: string) {
     const text = question.trim()
     if (!text || busy) return
-    const history = messages
-      .filter((message) => !message.pending)
-      .map((message) => ({ role: message.role, content: message.content }))
+    const history: { role: 'user' | 'assistant'; content: string }[] = SEND_HISTORY
+      ? messages
+          .filter((message) => !message.pending)
+          .map((message) => ({ role: message.role, content: message.content }))
+      : []
     const userId = crypto.randomUUID()
     setMessages((current) => [
       ...current,
@@ -102,7 +110,8 @@ export default function ChatDrawer({ open, selected, onClose }: Props) {
             ? {
                 ...message,
                 pending: false,
-                content: result.answer,
+                content: result.summary,
+                data: result,
                 tools: result.tools_used,
                 dates: result.dates_cited,
               }
@@ -176,13 +185,17 @@ export default function ChatDrawer({ open, selected, onClose }: Props) {
                   <Dot />
                 </span>
               ) : message.role === 'assistant' ? (
-                <div className="answer">
-                  <ReactMarkdown>{message.content}</ReactMarkdown>
-                </div>
+                message.data ? (
+                  <InferAnswer data={message.data} />
+                ) : (
+                  <div className="answer">
+                    <ReactMarkdown>{message.content}</ReactMarkdown>
+                  </div>
+                )
               ) : (
                 message.content
               )}
-              {!message.pending && message.role === 'assistant' && (
+              {!message.pending && message.role === 'assistant' && !message.data && (
                 <div className="mt-2 flex flex-wrap gap-1">
                   {(message.tools ?? []).map((tool, index) => (
                     <span key={`${tool.name}-${index}`} className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] text-slate-300">

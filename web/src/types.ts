@@ -68,6 +68,28 @@ export interface AskResponse {
   dates_cited: string[]
 }
 
+export interface Claim {
+  claim: string
+  evidence: string[]
+  confidence: 'low' | 'medium' | 'high'
+  alternative?: string
+  would_change_if?: string
+  grounded_in_docs?: boolean
+  note?: string
+}
+
+export interface InferResponse {
+  summary: string
+  summary_warning?: string | null
+  claims: Claim[]
+  not_known: string[]
+  verified: boolean
+  unverified_numbers: string[]
+  dropped_claims: number
+  tools_used: ToolUse[]
+  dates_cited: string[]
+}
+
 export interface AudienceAlert {
   text: string
   source: string

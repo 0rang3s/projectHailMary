@@ -1,5 +1,5 @@
 import type {
-  AskResponse,
+  InferResponse,
   Audience,
   AudienceAlert,
   DatesResponse,
@@ -57,7 +57,7 @@ export async function getDateLayers(date: string): Promise<DateLayers> {
 }
 
 export function askQuestion(question: string, history: { role: 'user' | 'assistant'; content: string }[]) {
-  return api<AskResponse>('/api/ask', {
+  return api<InferResponse>('/api/infer', {
     method: 'POST',
     body: JSON.stringify({ question, history }),
   })
