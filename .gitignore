@@ -6,3 +6,9 @@ venv/
 web/node_modules/
 web/dist/
 .DS_Store
+
+data/cache/
+data/index/
+*.bak
+__pycache__/
+.env

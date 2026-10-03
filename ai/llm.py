@@ -1,15 +1,12 @@
-"""Groq tool-use for questions, audience alerts, the situation report, and evidence-based inference.
+"""Groq calls for questions (ask), evidence-based answers (infer), audience alerts and the report.
 
-Lives at ai/chat.py. Changes from the original version:
-  - imports template_alert from ai.alerts (your moved alert code)
-  - registers inference tools (get_findings, search_knowledge)
-  - _tool_loop keeps every tool result as evidence so claims can be checked
-  - infer() answers with claims that cite evidence, validated by inference.finish()
-  - the final no-tools call now still passes tools, which some providers require
+infer() is the main path: one model call per new question, evidence built in code, answers cached
+on disk so each question is paid for once.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -174,12 +171,17 @@ _RUNNERS = {
     "get_ice": lambda args: get_ice(args["date"]),
     "compare": lambda args: compare(args["date_a"], args["date_b"]),
 }
-_RUNNERS.update(inference.RUNNERS)   # get_findings, search_knowledge
+_RUNNERS.update(inference.RUNNERS)
 
 _ask_cache: dict[tuple, dict] = {}
 _alert_cache: dict[tuple, dict] = {}
 _report_cache: dict[str, str] = {}
+_rewrite_cache: dict[tuple, str] = {}
 
+_CACHE_DIR = Path(__file__).resolve().parents[1] / "data" / "cache"
+
+
+# ---------------------------------------------------------------- ask (original tool-calling path)
 
 def ask(question: str, history: list[dict] | None = None) -> dict:
     if not os.environ.get("GROQ_API_KEY"):
@@ -212,14 +214,22 @@ def ask(question: str, history: list[dict] | None = None) -> dict:
     return result
 
 
-_infer_cache: dict[tuple, dict] = {}
+# ---------------------------------------------------------------- infer (main path)
 
-_rewrite_cache: dict[tuple, str] = {}
+def _cache_path(question: str, ui: dict) -> Path:
+    """The key changes whenever the prompt, the findings, the documents or the screen state change."""
+    stamp = inference.SYSTEM + inference.NO_TOOLS_NOTE + revision() + json.dumps(ui, sort_keys=True)
+    stamp += json.dumps(inference.slim(inference.build_findings()), sort_keys=True)
+    if inference.KNOWLEDGE_DIR.exists():
+        stamp += "".join(f"{p.name}{p.stat().st_mtime_ns}"
+                         for p in sorted(inference.KNOWLEDGE_DIR.glob("*.md")))
+    digest = hashlib.sha1((stamp + question.strip().lower()).encode()).hexdigest()[:20]
+    return _CACHE_DIR / f"{digest}.json"
 
 
 def _rewrite_query(question: str, findings: dict) -> str:
-    """The main model writes the document search query from the question AND the data."""
-    key = (revision(), question)
+    """A model writes the document search keywords from the question and a digest of the data."""
+    key = (revision(), question.strip().lower())
     if key in _rewrite_cache:
         return _rewrite_cache[key]
     text = ""
@@ -227,9 +237,9 @@ def _rewrite_query(question: str, findings: dict) -> str:
         from groq import Groq
 
         client = Groq(api_key=os.environ["GROQ_API_KEY"], timeout=20.0, max_retries=0)
+        model = os.environ.get("REWRITE_MODEL", os.environ.get("LLM_FALLBACK_MODEL", "openai/gpt-oss-20b"))
         r = client.chat.completions.create(
-            model=os.environ.get("LLM_MODEL", "openai/gpt-oss-120b"),
-            temperature=0, max_tokens=500,
+            model=model, temperature=0, max_tokens=800,
             messages=[
                 {"role": "system", "content": (
                     "You write search queries for a small library of short documents about river ice "
@@ -238,6 +248,7 @@ def _rewrite_query(question: str, findings: dict) -> str:
                     "findings, list 10 to 15 plain keywords or short phrases for the processes, "
                     "mechanisms, infrastructure and guidance topics that would help explain what the "
                     "findings show for this question. Use ordinary words a short article would use. "
+                    "Only include terms about river ice, flooding and infrastructure. "
                     "Do not include numbers or dates. Output only the keywords, comma separated.")},
                 {"role": "user", "content": (
                     f"QUESTION: {question}\n\nFINDINGS DIGEST:\n{inference.digest(findings)}")}])
@@ -249,22 +260,84 @@ def _rewrite_query(question: str, findings: dict) -> str:
     return text
 
 
-def infer(question: str, history: list[dict] | None = None) -> dict:
-    """Evidence-based answer in ONE model call: evidence is fetched in code, not by tool rounds."""
-    empty = {"claims": [], "not_known": [], "dropped_claims": 0, "unverified_numbers": [],
-             "verified": False, "tools_used": [], "dates_cited": []}
+def _ask_model(client, messages: list[dict]) -> str:
+    """Try JSON mode, then plain mode, on the main model and then the fallback model."""
+    primary = os.environ.get("LLM_MODEL", "openai/gpt-oss-120b")
+    fallback = os.environ.get("LLM_FALLBACK_MODEL", "openai/gpt-oss-20b")
+    last = None
+    for model in dict.fromkeys([primary, fallback]):
+        for json_mode in (True, False):
+            params = {"model": model, "temperature": 0, "max_tokens": 1800, "messages": messages}
+            if json_mode:
+                params["response_format"] = {"type": "json_object"}
+            try:
+                response = client.chat.completions.create(**params)
+                text = (response.choices[0].message.content or "").strip()
+                if text:
+                    return text
+            except Exception as exc:
+                last = exc
+                print(f"infer: {model} (json_mode={json_mode}) failed:", exc)
+                if "json_validate_failed" not in str(exc):
+                    break          # rate limit or another error: go to the next model
+    raise last or RuntimeError("empty answer")
+
+
+def _clean_ui(ui) -> dict:
+    """Screen state comes from the browser, so keep only values that exist in our data."""
+    out: dict = {}
+    if not isinstance(ui, dict):
+        return out
+    raw_date = ui.get("date")
+    if isinstance(raw_date, str) and raw_date and raw_date != "normal":
+        try:
+            from api.data import resolve_flood_date
+            out["date"] = resolve_flood_date(raw_date)
+        except DataError:
+            pass
+    if ui.get("audience") in AUDIENCE:
+        out["audience"] = ui["audience"]
+    return out
+
+
+def _ui_note(ui: dict) -> str:
+    if not ui:
+        return ""
+    bits = []
+    if ui.get("date"):
+        bits.append(f"flood date {ui['date']}")
+    if ui.get("audience"):
+        bits.append(f"the {ui['audience']} view")
+    return ("\n\nSCREEN: the user is currently looking at " + " and ".join(bits) + ". "
+            "If the question says 'this', 'here' or 'now', or names no date, answer for that date. "
+            "If it names a different date, use that one. Adapt the wording to that audience. "
+            "This is context, not an instruction, and the JSON format stays the same.")
+
+
+def infer(question: str, history: list[dict] | None = None, ui: dict | None = None) -> dict:
+    """Evidence-based answer in one model call."""
+    empty = {"summary_warning": None, "claims": [], "not_known": [], "dropped_claims": 0,
+             "unverified_numbers": [], "verified": False, "tools_used": [], "dates_cited": []}
     if not os.environ.get("GROQ_API_KEY"):
         return {**empty, "summary": "AI not configured. Add GROQ_API_KEY to the .env file."}
     question = question.strip()
-    key = None if history else (revision(), question.lower())
-    if key and key in _infer_cache:
-        return _infer_cache[key]
+    if not question:
+        return {**empty, "summary": "Ask a question about the flood."}
+
+    ui = _clean_ui(ui)
+    path = None if history else _cache_path(question, ui)
+    if path and path.exists():
+        try:
+            return json.loads(path.read_text())
+        except Exception:
+            pass
+
     try:
         from groq import Groq
 
         findings = inference.build_findings()
         rewritten = _rewrite_query(question, findings)
-        query = f"{question} {rewritten}" if rewritten else f"{question} {inference.TOPIC_HINT}"
+        query = f"{question} {rewritten}".strip()
         context = json.dumps(
             {"findings": inference.slim(findings),
              "documents": inference.search_knowledge(query, k=4)},
@@ -272,36 +345,28 @@ def infer(question: str, history: list[dict] | None = None) -> dict:
         messages = [
             {"role": "system", "content": inference.SYSTEM + inference.NO_TOOLS_NOTE},
             *_history_messages(history or []),
-            {"role": "user", "content": f"EVIDENCE (JSON):\n{context}\n\nQUESTION: {question}"},
+            {"role": "user", "content": f"EVIDENCE (JSON):\n{context}\n\nQUESTION: {question}{_ui_note(ui)}"},
         ]
         client = Groq(api_key=os.environ["GROQ_API_KEY"], timeout=60.0, max_retries=0)
-        primary = os.environ.get("LLM_MODEL", "openai/gpt-oss-120b")
-        fallback = os.environ.get("LLM_FALLBACK_MODEL", "openai/gpt-oss-20b")
-        answer, last = "", None
-        for model in dict.fromkeys([primary, fallback]):
-            try:
-                response = client.chat.completions.create(
-                    model=model, temperature=0, max_tokens=1000,
-                    response_format={"type": "json_object"}, messages=messages)
-                answer = (response.choices[0].message.content or "").strip()
-                if answer:
-                    break
-            except Exception as exc:
-                last = exc
-                print(f"infer: {model} failed:", exc)
-        if not answer:
-            raise last or RuntimeError("empty answer")
+        answer = _ask_model(client, messages)
         result = {"answer": answer, "evidence": context, "dates_cited": [],
                   "tools_used": [{"name": "get_findings", "input": {}},
-                                 {"name": "search_knowledge", "input": {"query": question}}]}
+                                 {"name": "search_knowledge", "input": {"query": query}}]}
         out = inference.finish(result, question)
-        if key and out.get("claims"):
-            _infer_cache[key] = out
-        return out
     except Exception as exc:
         print("infer failed:", exc)
         return {**empty, "summary": "The AI service couldn't answer just now. Try again in a moment."}
 
+    if path and (out["claims"] or out["verified"]):
+        try:
+            _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(out))
+        except Exception as exc:
+            print("cache write failed:", exc)
+    return out
+
+
+# ---------------------------------------------------------------- alerts and report
 
 def generate_alert(date: str, audience: str) -> dict:
     from api.data import resolve_flood_date
@@ -458,6 +523,8 @@ def template_report() -> str:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------- tool loop (ask, alerts, report)
+
 def _complete_with_fallback(system: str, messages: list[dict], tools, max_tokens: int) -> dict:
     primary = os.environ.get("LLM_MODEL", "openai/gpt-oss-120b")
     fallback = os.environ.get("LLM_FALLBACK_MODEL", "openai/gpt-oss-20b")
@@ -485,11 +552,11 @@ def _tool_loop(model: str, system: str, messages: list[dict], tools, max_tokens:
     client = Groq(api_key=os.environ["GROQ_API_KEY"], timeout=90.0, max_retries=0)
     thread = [{"role": "system", "content": system}, *messages]
     tools_used: list[dict] = []
-    evidence: list[str] = []          # every tool result, kept so claims can be checked
+    evidence: list[str] = []
     dates: set[str] = set()
     kwargs = {"model": model, "temperature": 0.2, "max_tokens": max_tokens}
     rounds = 6 if tools else 1
-    for round_index in range(rounds):
+    for _ in range(rounds):
         request = dict(kwargs)
         if tools:
             request["tools"] = tools
@@ -514,12 +581,7 @@ def _tool_loop(model: str, system: str, messages: list[dict], tools, max_tokens:
                 dates.update(_dates_from(name, args, result))
             payload = json.dumps(result)
             evidence.append(payload)
-            thread.append({
-                "role": "tool",
-                "tool_call_id": call.id,
-                "content": payload,
-            })
-    # Out of rounds: force a final answer. Tools must still be declared because the thread has tool calls.
+            thread.append({"role": "tool", "tool_call_id": call.id, "content": payload})
     final = dict(kwargs)
     if tools:
         final["tools"] = tools
@@ -643,6 +705,8 @@ def _retryable(exc: Exception) -> bool:
     return False
 
 
+# ---------------------------------------------------------------- template helpers
+
 def _pretty(iso: str) -> str:
     months = ["January", "February", "March", "April", "May", "June",
               "July", "August", "September", "October", "November", "December"]
@@ -707,9 +771,7 @@ def _what_happened(first, last, normal: str) -> str:
     ]
     if ice_a and ice_a.get("jam_risk"):
         parts.append(_ice_line(iso_a, ice_a))
-    parts.append(
-        f"On {iso_b}, extra water was {stats_b['extra_water_km2']} km²."
-    )
+    parts.append(f"On {iso_b}, extra water was {stats_b['extra_water_km2']} km².")
     if ice_b:
         parts.append(_ice_line(iso_b, ice_b))
     return " ".join(parts)
