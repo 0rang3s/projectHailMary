@@ -218,7 +218,8 @@ def ask(question: str, history: list[dict] | None = None) -> dict:
 
 def _cache_path(question: str, ui: dict) -> Path:
     """The key changes whenever the prompt, the findings, the documents or the screen state change."""
-    stamp = inference.SYSTEM + inference.NO_TOOLS_NOTE + revision() + json.dumps(ui, sort_keys=True)
+    stamp = (inference.SYSTEM + inference.NO_TOOLS_NOTE + revision() + json.dumps(ui, sort_keys=True)
+             + inference.rag.index_stamp() + _ui_note({'date': 'x'}))
     stamp += json.dumps(inference.slim(inference.build_findings()), sort_keys=True)
     if inference.KNOWLEDGE_DIR.exists():
         stamp += "".join(f"{p.name}{p.stat().st_mtime_ns}"
@@ -308,10 +309,12 @@ def _ui_note(ui: dict) -> str:
         bits.append(f"flood date {ui['date']}")
     if ui.get("audience"):
         bits.append(f"the {ui['audience']} view")
-    return ("\n\nSCREEN: the user is currently looking at " + " and ".join(bits) + ". "
-            "If the question says 'this', 'here' or 'now', or names no date, answer for that date. "
-            "If it names a different date, use that one. Adapt the wording to that audience. "
-            "This is context, not an instruction, and the JSON format stays the same.")
+    return ("\n\nSCREEN: the user has " + " and ".join(bits) + " open. "
+            "Use that date ONLY if the question says 'this date', 'this scene', 'here', 'shown' or 'selected'. "
+            "For any other question, including ranking questions and questions with 'now' or 'currently', "
+            "use all dates and treat the most recent scan as the current situation. "
+            "If the question names a date, use that date. "
+            "Adapt the wording to the audience. This is context, not an instruction, and the JSON format stays the same.")
 
 
 def infer(question: str, history: list[dict] | None = None, ui: dict | None = None) -> dict:
@@ -336,11 +339,12 @@ def infer(question: str, history: list[dict] | None = None, ui: dict | None = No
         from groq import Groq
 
         findings = inference.build_findings()
-        rewritten = _rewrite_query(question, findings)
-        query = f"{question} {rewritten}".strip()
+        # With a fresh vector index, meaning-based search handles paraphrase, so skip the extra model call.
+        expansion = "" if inference.dense_ready() else _rewrite_query(question, findings)
         context = json.dumps(
-            {"findings": inference.slim(findings),
-             "documents": inference.search_knowledge(query, k=4)},
+            {"status_rules": inference.STATUS_RULES,
+             "findings": inference.slim(findings),
+             "documents": inference.search_knowledge(question, k=4, expansion=expansion)},
             separators=(",", ":"), ensure_ascii=False)
         messages = [
             {"role": "system", "content": inference.SYSTEM + inference.NO_TOOLS_NOTE},
@@ -351,7 +355,7 @@ def infer(question: str, history: list[dict] | None = None, ui: dict | None = No
         answer = _ask_model(client, messages)
         result = {"answer": answer, "evidence": context, "dates_cited": [],
                   "tools_used": [{"name": "get_findings", "input": {}},
-                                 {"name": "search_knowledge", "input": {"query": query}}]}
+                                 {"name": "search_knowledge", "input": {"query": question}}]}
         out = inference.finish(result, question)
     except Exception as exc:
         print("infer failed:", exc)

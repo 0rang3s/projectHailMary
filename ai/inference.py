@@ -10,15 +10,19 @@ This file does not import ai.llm, so there is no circular import.
 from __future__ import annotations
 
 import json
+import math
+import os
 import re
+import types
+from collections import Counter
 from datetime import date
 from pathlib import Path
 
 from api.data import DataError, get_ice, get_lifelines, get_stats, list_dates, revision
 
+VERSION = "inference-single-file-2026-10-03"
 RED_M = 200    # red is 200 m or less
 FLAT_M = 25    # a change smaller than this counts as "steady"
-KNOWLEDGE_DIR = Path(__file__).resolve().parents[1] / "data" / "knowledge"
 
 # ---------------------------------------------------------------- findings
 
@@ -147,41 +151,124 @@ def digest(findings: dict) -> str:
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------- knowledge search
+# ---------------------------------------------------------------- knowledge search (built in)
+# Keyword search (BM25) over data/knowledge/*.md. Format: first line "source: <url>", a blank line,
+# then paragraphs. Edits to the files are picked up automatically, with no restart.
 
-_chunks: list[dict] = []
-_vec = _mat = None
+KNOWLEDGE_DIR = Path(__file__).resolve().parents[1] / "data" / "knowledge"
+MIN_WORDS = 15
+_TOKEN = re.compile(r"[a-z0-9]+")
+_STOP = set("a an and are as at be been but by can did do does for from had has have how if in into is it its "
+            "of on or so than that the their then there these they this to was were what when where which "
+            "who why will with would you your".split())
+_SYNONYMS = {"dyke": "dike", "dykes": "dikes", "levee": "dike", "levees": "dikes",
+             "embankment": "dike", "embankments": "dikes"}
 
 
-def _load_knowledge() -> None:
-    global _vec, _mat
-    if _vec is not None or not KNOWLEDGE_DIR.exists():
-        return
-    for p in sorted(KNOWLEDGE_DIR.glob("*.md")):
+def _stem(t: str) -> str:
+    if len(t) > 5 and t.endswith("ing"):
+        return t[:-3]
+    if len(t) > 4 and t.endswith("ed"):
+        return t[:-2]
+    if len(t) > 4 and t.endswith("es"):
+        return t[:-2]
+    if len(t) > 3 and t.endswith("s") and not t.endswith("ss"):
+        return t[:-1]
+    return t
+
+
+def _tokens(text: str) -> list[str]:
+    return [_stem(_SYNONYMS.get(t, t)) for t in _TOKEN.findall(text.lower()) if t not in _STOP and len(t) > 1]
+
+
+class _BM25:
+    def __init__(self, docs: list[list[str]], k1: float = 1.5, b: float = 0.75):
+        self.docs, self.k1, self.b, self.n = docs, k1, b, len(docs)
+        self.avgdl = sum(len(d) for d in docs) / max(self.n, 1)
+        df: Counter = Counter()
+        for d in docs:
+            df.update(set(d))
+        self.idf = {t: math.log(1 + (self.n - c + 0.5) / (c + 0.5)) for t, c in df.items()}
+        self.tf = [Counter(d) for d in docs]
+
+    def scores(self, query_tokens: list[str]) -> list[float]:
+        out = [0.0] * self.n
+        for t in set(query_tokens):
+            idf = self.idf.get(t)
+            if idf is None:
+                continue
+            for i, tf in enumerate(self.tf):
+                f = tf.get(t, 0)
+                if f:
+                    norm = f + self.k1 * (1 - self.b + self.b * len(self.docs[i]) / self.avgdl)
+                    out[i] += idf * f * (self.k1 + 1) / norm
+        return out
+
+
+_kb: dict = {"sig": None, "chunks": [], "bm25": None}
+
+
+def _signature() -> tuple:
+    if not KNOWLEDGE_DIR.exists():
+        return ()
+    return tuple((p.name, p.stat().st_mtime_ns) for p in sorted(KNOWLEDGE_DIR.glob("*.md"))
+                 if not p.stem.startswith("_"))
+
+
+def _load_kb() -> dict:
+    sig = _signature()
+    if _kb["sig"] == sig:
+        return _kb
+    chunks = []
+    for p in sorted(KNOWLEDGE_DIR.glob("*.md")) if KNOWLEDGE_DIR.exists() else []:
         if p.stem.startswith("_"):
             continue
-        blocks = p.read_text(encoding="utf-8").split("\n\n")
-        url = blocks[0].splitlines()[0].replace("source:", "").strip() if blocks else ""
-        for i, para in enumerate(blocks[1:]):
-            if len(para.split()) > 20:
-                _chunks.append({"id": f"{p.stem}#{i}", "source": p.stem, "url": url,
-                                "text": para.strip()})
-    if _chunks:
-        from sklearn.feature_extraction.text import TfidfVectorizer
-        _vec = TfidfVectorizer(stop_words="english", ngram_range=(1, 2))
-        _mat = _vec.fit_transform([c["text"] for c in _chunks])
+        blocks = [b.strip() for b in p.read_text(encoding="utf-8").split("\n\n") if b.strip()]
+        if not blocks or not blocks[0].lower().startswith("source:"):
+            print(f"knowledge file {p.name} skipped: the first line must start with 'source:'")
+            continue
+        first, *rest = blocks[0].splitlines()
+        url = first.split(":", 1)[1].strip()
+        paragraphs = ["\n".join(rest).strip()] if "\n".join(rest).strip() else []
+        paragraphs += blocks[1:]
+        for i, text in enumerate(paragraphs):
+            text = " ".join(text.split())
+            if len(text.split()) >= MIN_WORDS:
+                chunks.append({"id": f"{p.stem}#{i}", "source": p.stem, "url": url, "text": text})
+    _kb.update(sig=sig, chunks=chunks,
+               bm25=_BM25([_tokens(c["text"]) for c in chunks]) if chunks else None)
+    return _kb
 
 
-def search_knowledge(query: str, k: int = 3):
-    _load_knowledge()
-    if not _chunks:
+def search_knowledge(query: str, k: int = 3, expansion: str = ""):
+    """Keyword search over the knowledge files. `expansion` is extra keywords to match."""
+    kb = _load_kb()
+    if not kb["chunks"]:
         return {"error": "No background documents are loaded."}
-    from sklearn.metrics.pairwise import cosine_similarity
-    sims = cosine_similarity(_vec.transform([query]), _mat)[0]
-    top = sims.argsort()[::-1][:k]
-    hits = [{**_chunks[i], "score": round(float(sims[i]), 2)} for i in top if sims[i] > 0]
+    scores = kb["bm25"].scores(_tokens(f"{query} {expansion}"))
+    top = sorted((i for i, s in enumerate(scores) if s > 0), key=lambda i: -scores[i])[:k]
+    hits = [{**{key: kb["chunks"][i][key] for key in ("id", "source", "url", "text")},
+             "score": round(scores[i], 4)} for i in top]
     return hits or {"error": "Nothing relevant in the background documents."}
 
+
+def dense_ready() -> bool:
+    """llm.py runs an extra query-rewrite model call unless this is True.
+    Set RAG_SKIP_REWRITE=1 in .env to skip that call and save tokens."""
+    return os.environ.get("RAG_SKIP_REWRITE", "").strip() == "1"
+
+
+def _index_stamp() -> str:
+    """Part of the answer-cache key: changes when any knowledge file changes."""
+    return f"kw-1|{hash(_signature())}|{len(_load_kb()['chunks'])}"
+
+
+# llm.py reads inference.rag.index_stamp(); this keeps it working with no separate rag.py.
+rag = types.SimpleNamespace(VERSION="kw-1", KNOWLEDGE_DIR=KNOWLEDGE_DIR, index_stamp=_index_stamp)
+
+
+STATUS_RULES = ("red = 200 m or less from flood water; yellow = within 1 km (1000 m); "
+                "green = farther than that. Distances are to the nearest detected water.")
 
 # ---------------------------------------------------------------- tools (used by the ask() path)
 
@@ -266,6 +353,20 @@ DOCUMENTS
 - When a claim cites a document id, copy under 15 words from that document into doc_quote, exactly
   as written. If you cannot quote it, do not cite the document.
 
+SAFETY WORDING
+- Radar measures distance to water. It cannot show that an airstrip, road or building is safe, open or
+  usable. Never write "safe", "can land", "usable" or "access is possible". Write what radar shows,
+  for example "no water was detected within 1815 m of the airstrip on 2025-05-19", and say in
+  not_known that conditions on the ground must be confirmed with local officials or observers.
+- status_rules in EVIDENCE explains the colours. Use its wording for thresholds and do not quote any
+  other threshold.
+
+BACKGROUND QUESTIONS
+- If the question asks why a place, lifeline or the dike matters, or what a result means for people,
+  explain it from the documents in EVIDENCE and cite them with doc_quote. Keep the radar facts in a
+  separate claim that cites findings only. If no document fits, say the available documents do not
+  cover it.
+
 RADAR VOCABULARY
 - Radar here gives distance to water and water extent. It does not measure water level, depth,
   flow, rainfall or meltwater. Do not say any of these rose or fell unless a quoted document says it.
@@ -315,6 +416,9 @@ OUTPUT: reply with ONLY this JSON object. No markdown, no text before or after.
 # ---------------------------------------------------------------- validation
 
 _NUM = re.compile(r"\d+(?:,\d{3})*(?:\.\d+)?")
+_SAFETY = re.compile(r"\b(safe|safely|safest|can land|usable|passable|open for)\b", re.I)
+SAFETY_LIMIT = ("Radar shows distance to water only. It cannot confirm that an airstrip or road is "
+                "safe or usable; confirm conditions on the ground with local officials.")
 _CAUSAL = re.compile(
     r"\b(because|caused|due to|driven|led to|resulting|surge|pulse|rise in|raised)\b", re.I)
 
@@ -406,6 +510,11 @@ def finish(result: dict, question: str) -> dict:
             if not c["claim"].startswith("Unsourced hypothesis"):
                 c["claim"] = "Unsourced hypothesis: " + c["claim"]
 
+        if _SAFETY.search(c.get("claim", "")):
+            if c["confidence"] == "high":
+                c["confidence"] = "medium"
+            limits.append(SAFETY_LIMIT)
+
         for e in ev:
             if e in approx:
                 limits.append(f"{approx[e]} location is approximate (not verified).")
@@ -422,7 +531,11 @@ def finish(result: dict, question: str) -> dict:
 
     summary = data.get("summary", "")
     warning = None
-    if kept and _CAUSAL.search(summary) and not any(c.get("grounded_in_docs") for c in kept):
+    if _SAFETY.search(summary):
+        warning = "Radar cannot confirm that anything is safe or usable. Confirm with local officials."
+        limits.append(SAFETY_LIMIT)
+        not_known = list(dict.fromkeys(not_known + [SAFETY_LIMIT]))
+    if kept and not warning and _CAUSAL.search(summary) and not any(c.get("grounded_in_docs") for c in kept):
         warning = ("The summary suggests a cause, but no background document supports it. "
                    "Treat it as a hypothesis.")
 

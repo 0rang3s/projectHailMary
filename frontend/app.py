@@ -49,6 +49,11 @@ except Exception:
     ask_model = ask_with_data = generate_alert = situation_report = None
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
+try:
+    from ai_bridge import ask_checked, answer_html
+except Exception as exc:
+    ask_checked = answer_html = None
+    print("AI bridge unavailable:", exc)
 import importlib
 import factcheck
 importlib.reload(factcheck)
@@ -870,8 +875,13 @@ def radar_brief(scenes, showing):
     return "\n".join(lines)
 
 
+
 def respond(question, scene, scenes, history):
     """Answer from the radar numbers on this page. One model call when a Groq key is set."""
+    if ask_checked is not None:
+        picked = ask_checked(question, scene["date"], st.session_state.get("audience-label"))
+        if picked:
+            return {"answer": picked["text"], "tools_used": [], "dates_cited": picked["dates"], "ai": picked["raw"]}
     if ask_with_data is not None and os.environ.get("GROQ_API_KEY"):
         result = ask_with_data(question, radar_brief(scenes, scene["date"]), history)
         if result and result.get("answer"):
@@ -908,7 +918,8 @@ def remember_answer(question, scene, scenes):
         "role": "assistant",
         "content": answer,
         "tools": tools,
-        "dates": result.get("dates_cited") or [],
+        "dates": result.get("dates_cited") or [], 
+        "ai": result.get("ai"),
         "check": factcheck.check_answer(answer, facts, derived),
     })
 
@@ -987,6 +998,8 @@ def chat_panel(scene, scenes):
                     badge = check_badge(check)
                 else:
                     body = html.escape(message["content"]).replace("\n", "<br>")
+                if message.get("ai") and answer_html is not None:
+                    body = answer_html(message["ai"])
                 chips = "".join(f"<i>{html.escape(name)}</i>" for name in message.get("tools") or [])
                 chips += "".join(f"<i class='when'>{html.escape(date)}</i>" for date in message.get("dates") or [])
                 if chips:
