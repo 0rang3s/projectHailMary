@@ -1,105 +1,230 @@
 # RCM FloodScope
 
-Our project for Mission Accepted (Challenge 3). Basically, we use Canada's RADARSAT Constellation Mission (RCM) radar to map the spring 2025 Albany River flood and check how close the water got to Fort Albany and Kashechewan's lifelines: the airstrips, the causeway and the towns themselves.
+RCM FloodScope maps river floods from Canada's RADARSAT Constellation Mission (RCM) radar and measures how close the water gets to the places people depend on: airstrips, causeways, roads, and the towns themselves. It also checks for ice jams, which are what actually back the water up.
 
-## Why this matters
+It was built for Mission Accepted, Challenge 3. The worked example is the spring 2025 Albany River flood at Fort Albany and Kashechewan, two fly-in First Nations on James Bay. The same app can open any other place in Canada that the free RCM archive covers, or a pair of radar images you upload yourself.
 
-Fort Albany and Kashechewan are fly-in First Nations on James Bay. Every spring the river ice breaks up, jams, and the water backs up into the communities. In 2025 Kashechewan evacuated in mid-April and Fort Albany declared an emergency on April 29–30. Normal satellite photos are useless here because of cloud, darkness and snow. Radar sees through all of that.
+## Team
 
-## How it works
+- Aryan Shashikumar Srivastava
+- Anshdeep Singh Bhachoo
+- Rayyan Azher Miswani
+- Adi Sahota
+- Jay Sarju Patel
 
-We take radar pictures of the same area on different days and turn each one into a water map. Water is smooth so it shows up dark on radar, and anything darker than a cutoff counts as water. Then we compare each flood-season day against a normal summer day. Water that's there during the flood but not on the normal day is the flood. Then we measure how far that water is from each lifeline.
+## Why radar
 
-We also built an ice-jam detector. Ice jams are what actually cause these floods. Open water looks dark on radar and ice looks bright, so inside the river's normal channels anything that isn't water on a flood date is most likely ice. If the river is mostly frozen right by the towns while it's mostly open upstream, that's the warning sign, because the water coming down has nowhere to go.
+Fort Albany and Kashechewan flood when spring ice breaks up, jams, and the river has nowhere to go. In 2025 Kashechewan evacuated in mid-April and Fort Albany declared an emergency on April 29–30. Optical satellite photos fail here because of cloud, darkness, and snow. Radar sees through all of that.
 
-## The data
+Smooth water looks dark on radar. Ice and rough land look bright. RCM FloodScope turns each radar scene into a water map, compares a flood day with a normal summer day, and treats water that is present on the flood day but not on the normal day as the flood. It then measures the distance from that water to each lifeline.
 
-- Apr 30, 2025: the night Fort Albany declared the emergency (EODMS order, 12.5 m)
-- May 7, 2025: one week later (RCM analysis-ready data from AWS, 20 m)
-- May 19, 2025: water draining (same source)
-- Aug 7, 2025: our normal day (same source)
+Ice jams are a separate check. Inside the river's normal channel, anything that is not water on a flood date is treated as ice. If the river is mostly frozen beside the towns and mostly open upstream, water coming downstream has nowhere to go. That pattern is the jam warning.
 
-The free AWS archive only starts in 2025 (we checked year by year, nothing for 2019–2024 anywhere in Canada), so our normal day is the summer after the flood, not before it.
+## Tech stack
 
-We also grabbed Apr 1, 2025 (same satellite pass as May 7, May 19 and Aug 7). It's an ice-only reference date: the river is frozen everywhere, upstream too, so no jam. We don't compute flood numbers for it because in early April wet snow and frozen bogs look dark on radar and get mistaken for water. Those same dark patches show up on Apr 30, which tells us most of the Apr 30 red patches away from the river aren't flood. There's also a gap in the archive over our area from Apr 8 to May 6, right during breakup, so Apr 30 only exists because of our EODMS order.
+Python 3.10 or newer.
 
-## What we found
+| Piece | What it is |
+| --- | --- |
+| Dashboard | [Streamlit](https://streamlit.io/). The map page and the projects page both live in `frontend/`. |
+| Map | [Folium](https://python-visualization.github.io/folium/) and [streamlit-folium](https://github.com/randyzwitch/streamlit-folium), drawn on Leaflet. |
+| Charts | [Altair](https://altair-viz.github.io/). |
+| Rasters and vectors | [rasterio](https://rasterio.readthedocs.io/), [GeoPandas](https://geopandas.org/), [Shapely](https://shapely.readthedocs.io/), [pyproj](https://pyproj4.github.io/pyproj/). |
+| Image math | NumPy, pandas, SciPy, scikit-image, scikit-learn. Phase correlation lines a shifted scene up with the normal day. |
+| Radar catalog | [pystac-client](https://pystac-client.readthedocs.io/) against the EODMS STAC catalog. Scenes are RCM analysis-ready data (`rcm-ard`) from the public AWS bucket. Downloads are unsigned (`AWS_NO_SIGN_REQUEST`). |
+| Place names | OpenStreetMap Nominatim, limited to Canada. |
+| Assistant | [Groq](https://groq.com/). Default model `openai/gpt-oss-120b`, fallback `openai/gpt-oss-20b`. Without a key, alerts and answers still come from templates and the files on the page. |
+| HTTP API | [FastAPI](https://fastapi.tiangolo.com/) and [uvicorn](https://www.uvicorn.org/). The dashboard does not need this process. It calls the same Python modules directly. |
 
-Extra water compared to normal, along the river, was about 66.5 km² on Apr 30, 20.7 km² on May 7 and 13.0 km² on May 19. We leave out the James Bay shoreline east of the river mouth, because the tidal flats and breaking sea ice there aren't river flooding (with the shore included it was 67.0 km² on May 7 and 20.1 km² on May 19, and both numbers are saved in `stats.json`). Apr 30 is a different, uncalibrated product and a lot of the river was hidden under ice, so don't compare it straight against the May numbers. On the emergency night, water got within roughly 60–200 m of Fort Albany's airstrip and causeway area, when normally it's 370–490 m away. That lines up with the news saying the causeway was less than a foot from overflowing.
+## How to run
 
-The ice result is the big one (see `outputs/ice_timeline.png`). On Apr 1 the river was 97–99% frozen everywhere, upstream too. On Apr 30 the river was 97–99% frozen within 5 km of both towns while only about 11% frozen upstream, which is the classic ice-jam setup. By May 7 it was fully open at Fort Albany and only 30% frozen at Kashechewan, and by May 19 it was basically all open. We tested different cutoffs and smoothing and the near-town number stays at 93–100% no matter what, so it's not a fluke of one setting.
-
-## Run it
+From the repo root:
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env
+```
+
+Put a Groq key in `.env` if you want the model. The file is gitignored.
+
+```
+GROQ_API_KEY=
+LLM_MODEL=openai/gpt-oss-120b
+LLM_FALLBACK_MODEL=openai/gpt-oss-20b
+```
+
+### Dashboard
+
+```bash
 streamlit run frontend/app.py
 ```
 
-`frontend/app.py` is the dashboard (timeline, map, lifelines, ice, charts, and Ask RCM FloodScope).
+Open http://localhost:8501. The first screen is saved projects. **Open map** on Albany River, spring 2025 loads the flood the rest of this README describes. Fort McMurray is a second saved project (May 1, 2026 against a July 5, 2025 normal day).
 
-Ask RCM FloodScope answers from these radar files on its own. For the fuller assistant that looks up any date, copy `.env.example` to `.env` and add a `GROQ_API_KEY`. Alerts for coordinators, the community, and pilots, plus the situation report, work either way.
+On a map:
 
-Use the slider at the top to move between dates. Blue is where water normally is, red is extra water on that date, and the dots are lifelines coloured by how close the water is (red means 200 m or less, yellow means within 1 km).
+- The date slider moves between flood days and the normal day.
+- Blue is water on the normal day. Red is extra water on the selected flood day. Bright river ice is its own layer.
+- Lifeline dots are red within 200 m of water, yellow within 1 km, and green beyond that.
+- Guide is the chat. It answers from the radar results for the open project. A number check compares figures in the reply with the files.
+- Coordinator, Community, and Pilots are three wordings of the same day's numbers.
+- **Download situation report** saves a markdown report for the project on screen.
 
-## Upload your own radar images
+### API
 
-The dashboard now opens on a landing page. On the left are saved projects, on the right you make a new one. Albany is saved project #1, so clicking Open map on it gives the same results as before.
-
-To make a new project:
-
-1. Give it a name.
-2. Pick where the radar comes from:
-   - **Find radar for a place** (easiest): type a place name and hit Find place, click the map, or type lat/lon. Set the box size. Pick a date range for the normal day (summer, no flood) and one for the flood. Hit Search the archive. It lists every RCM scene over that box from the free AWS archive (2025 onward) and pre-ticks the best ones. Untick or change roles if you want.
-   - **Upload my own files**: one normal-day image and one or more flood-day images of the same place. Use the `rr.tif` file for AWS analysis-ready data, or `HV.tif` for an EODMS order. Check the dates in the table and pick the normal day.
-3. Optional: add lifelines (name, type, lat, lon), or upload a CSV. Towns should be type `community`, since that's what turns on the ice-jam check.
-4. Click Download and process (or Process images). It downloads only your box, then takes about 30 seconds to a few minutes and opens the map.
-
-Everything it figures out by itself (the area, the projection, the water cutoff, how much to shift an image to line it up) gets written to `data/projects/<name>/project.json`. You can edit any of it there and hit Run again. You can also run a project without the app: `python pipeline/run_project.py <name>`.
-
-Things to know:
-
-- The raw radar files and the big `.tif` files aren't in git. So a saved project opens fine from its results, but Run again only works on the computer that has the inputs.
-- Images from Nov to Apr get a snow warning. Wet snow looks like water, so extra water can come out too high. The ice check still works.
-- With no towns in the lifelines there's no jam check, just how much of the river is frozen.
-- The Albany project has its cutoffs set by hand (checked against the news). A fully automatic run on the same files lands close, but not exact: about 41 km² extra water on Apr 30 instead of 66.5, and the same ice-jam result.
-
-## What's in the repo
-
-- `pipeline/water_mask.py` turns a radar picture into a water map
-- `pipeline/analyze.py` compares a flood date to normal and checks the lifelines
-- `pipeline/ice.py` is the ice-jam detector
-- `pipeline/get_ard_baseline.py` downloads RCM pictures from AWS (no ordering needed)
-- `pipeline/run_project.py` runs everything for one project (any place, any images)
-- `pipeline/archive.py` searches and downloads RCM radar for any box from the free AWS archive
-- `ai/` is the assistant: questions, alerts for each audience, the situation report (`ai/alerts.py` writes the plain-language alert)
-- `frontend/app.py` is the dashboard, `frontend/projects.py` is the landing page (saved projects + new project)
-- `data/projects/` holds each saved project's results (Albany is `albany-2025`)
-- `data/real/` holds all the processed results
-- `outputs/flood_story.png` is the before/after image for the slides
-- `outputs/ice_jam.png` shows the frozen river on Apr 30 vs open on May 7
-- `outputs/ice_timeline.png` shows the whole breakup: Apr 1, Apr 30, May 7, May 19
-
-The raw radar files aren't in the repo because they're too big. Run `get_ard_baseline.py` to grab them again.
-
-## Rerun after changing lifeline locations
+Optional. Same questions, alerts, and layers over HTTP, for the Albany `data/real` folder:
 
 ```bash
-for d in 2025-04-30 2025-05-07 2025-05-19; do
-  python pipeline/analyze.py data/real/normal_2025-08-07_water.geojson data/real/flood_${d}_water.geojson \
-         data/real/flood_${d}_mask.tif data/lifelines.json data/real/$d
-done
-python pipeline/ice.py data/real/normal_2025-08-07_mask.tif data/real/flood_2025-04-30_mask.tif data/lifelines.json data/real/2025-04-30 \
-       --db data/real/flood_2025-04-30_db.tif --ice-threshold 49.5 --median 7
-for d in 2025-05-07 2025-05-19; do
-  python pipeline/ice.py data/real/normal_2025-08-07_mask.tif data/real/flood_${d}_mask.tif data/lifelines.json data/real/$d
-done
-for d in 2025-04-30 2025-05-07 2025-05-19; do python alert/generate_alert.py data/real/$d; done
+uvicorn api.main:app --reload
 ```
 
-The `_db.tif` files aren't in the repo, so to rerun the Apr 30 ice step you need to regenerate them first with `pipeline/water_mask.py` (Apr 30 uses `--band HV --threshold 47.5 --shift-px 2,0`).
+| Method | Path | What it returns |
+| --- | --- | --- |
+| GET | `/api/dates` | Flood dates and the normal date |
+| GET | `/api/dates/{date}/summary` | Stats, ice, lifelines, alert |
+| GET | `/api/layers/normal` | Normal-day water GeoJSON |
+| GET | `/api/dates/{date}/layers/{kind}` | `extra`, `ice`, or `water` GeoJSON |
+| POST | `/api/ask` | `{ "question", "history" }` |
+| POST | `/api/infer` | Checked answer with claims |
+| POST | `/api/alert` | `{ "date", "audience" }` where audience is `coordinator`, `community`, or `pilots` |
+| GET | `/api/report` | Situation report as markdown |
 
-## Things to keep in mind
+### Pipeline by hand
 
-The Apr 30 picture is a different product from the others and isn't calibrated, so compare it with some care. It was also sitting about 40 m off from the other pictures, so we nudge it back into place (`--shift-px 2,0`). On Apr 30 a lot of the river near the towns was still iced over, and ice doesn't show up as water, so Kashechewan's flood is probably under-counted that day. The ice detector catches that instead. Some of the upstream ice it flags on Apr 30 could just be noise, since that picture is grainier. Some of the red patches away from the river could be pooled meltwater, wet snow or just radar noise, so the red right along the river is what to focus on. The causeway and town centre locations are approximate for now. Distances count open water, river ice and the river's normal channel, because a frozen river is still the river and the river doesn't disappear during a flood. That's why Kashechewan never shows up as farther than normal anymore. The open-water-only distance is still saved as `dist_open_water_m`. Run `pipeline/ice.py` before `pipeline/analyze.py`, since the distance step uses the ice map.
+Search the free archive for the Albany box (summer 2025 and the spring flood window) and download one scene by the number it prints:
 
+```bash
+python pipeline/get_ard_baseline.py
+python pipeline/get_ard_baseline.py 3
+```
+
+Run a saved project from its `project.json` and `inputs/` rasters:
+
+```bash
+python pipeline/run_project.py albany-2025
+```
+
+A project folder looks like `data/real`:
+
+```
+data/projects/<slug>/
+  project.json
+  inputs/<date>.tif
+  lifelines.json
+  normal_<date>_water.geojson
+  flood_<date>_water.geojson
+  <date>/stats.json
+  <date>/ice_stats.json
+  <date>/lifelines_status.json
+  <date>/alert.json
+  <date>/flood_extra.geojson
+  <date>/river_ice.geojson
+```
+
+`project.json` records the area, projection, pixel size, and water cutoff, including whether each value was detected or typed in. Edit it and run the project again. Raw inputs and the large `*_db.tif` files are gitignored, so **Run again** only works on the machine that still has those files. Opening a finished project does not need them.
+
+One scene, if you are not using `run_project`:
+
+```bash
+python pipeline/water_mask.py hh.tif hv.tif data/real/flood_2025-05-07 --kind ard --band HV
+python pipeline/analyze.py data/real/normal_2025-08-07_water.geojson \
+  data/real/flood_2025-05-07_water.geojson data/real/flood_2025-05-07_mask.tif \
+  data/lifelines.json data/real/2025-05-07
+python pipeline/ice.py data/real/normal_2025-08-07_mask.tif \
+  data/real/flood_2025-05-07_mask.tif data/lifelines.json data/real/2025-05-07
+python ai/alerts.py data/real/2025-05-07
+```
+
+Apr 30 is an uncalibrated EODMS GRD product and sits about 40 m off the other scenes. Rebuild it with `--band HV --threshold 47.5 --shift-px 2,0`, then run ice with its own cutoff before analyze, because distances use the ice map:
+
+```bash
+python pipeline/ice.py data/real/normal_2025-08-07_mask.tif \
+  data/real/flood_2025-04-30_mask.tif data/lifelines.json data/real/2025-04-30 \
+  --db data/real/flood_2025-04-30_db.tif --ice-threshold 49.5 --median 7
+```
+
+The `_db.tif` files are not in git. Regenerate them with `water_mask.py` before that ice command.
+
+## A new project
+
+On the landing page, name the project and pick a radar source.
+
+**Find radar for a place.** Type a Canadian place, click the map, or enter latitude and longitude. Set the box size and a date range for a normal summer day and for the flood. Search lists RCM scenes from the free archive (2025 onward) and pre-selects a matching pair. The download is cropped to your box.
+
+**Upload files.** One normal-day image and at least one flood-day image of the same place. Use `rr.tif` for AWS analysis-ready data, or `HV.tif` for an EODMS order. Each file needs its own `YYYY-MM-DD` date.
+
+Lifelines are optional: name, type (`community`, `airstrip`, `causeway`, `road`, or `other`), latitude, and longitude, or a CSV. Towns should be type `community`. That is what turns the ice-jam check on. With no towns, the app still reports how much of the river is frozen, but it does not call a jam.
+
+Processing takes about 30 seconds to a few minutes, then the map opens.
+
+Nov–Apr scenes get a snow warning. Wet snow and frozen bogs can look like water, so extra water can be too high. The ice check still runs. A fully automatic Albany run is close to the hand-tuned one but not identical: about 41 km² of extra water on Apr 30 instead of 66.5 km², with the same ice-jam call.
+
+## Albany River, spring 2025
+
+| Date | Role | Source |
+| --- | --- | --- |
+| Apr 1, 2025 | Ice-only reference. Not a flood number. | RCM ARD, same pass as May 7, May 19, and Aug 7 |
+| Apr 30, 2025 | Emergency night | EODMS order, 12.5 m, uncalibrated |
+| May 7, 2025 | One week later | RCM ARD from AWS, 20 m |
+| May 19, 2025 | Water draining | RCM ARD from AWS, 20 m |
+| Aug 7, 2025 | Normal day | RCM ARD from AWS, 20 m |
+
+The free AWS archive starts in 2025. Year-by-year checks found nothing for 2019–2024 anywhere in Canada, so the normal day is the summer after the flood, not before it. The archive also has a gap over this river from Apr 8 to May 6, during breakup, which is why Apr 30 exists only as an EODMS order.
+
+Apr 1 is frozen everywhere, including upstream, so it is not a jam. Flood numbers are not computed for it: in early April, wet snow and frozen bogs look dark and get counted as water. Those same dark patches show up on Apr 30, which is why most of the red away from the river that night is not flood.
+
+Extra water along the river, with the James Bay shore left out, was about **66.5 km² on Apr 30**, **20.7 km² on May 7**, and **13.0 km² on May 19**. With the shore included, May 7 was 67.0 km² and May 19 was 20.1 km². Both figures are in `stats.json`. Do not compare Apr 30 straight against the May numbers: it is a different product, and a lot of the river was still under ice, so the flood beside Kashechewan is probably under-counted. The ice detector is the record for that night.
+
+On the emergency night, water got within roughly 60–200 m of Fort Albany's airstrip and causeway area. On the normal day those distances are about 370–490 m. That matches reporting that the causeway was less than a foot from overflowing.
+
+Ice, in `outputs/ice_timeline.png`:
+
+- Apr 1: 97–99% frozen everywhere, upstream included.
+- Apr 30: 97–99% frozen within 5 km of both towns, about 11% frozen upstream. That is the jam pattern.
+- May 7: open at Fort Albany, about 30% frozen at Kashechewan.
+- May 19: essentially open.
+
+The near-town frozen fraction stays at 93–100% across cutoffs and smoothing, so it is not an artifact of one setting.
+
+## What is in the repo
+
+| Path | Role |
+| --- | --- |
+| `frontend/app.py` | Map, timeline, lifelines, ice, charts, Guide, alerts, report download |
+| `frontend/projects.py` | Saved projects and the new-project form |
+| `frontend/factcheck.py` | Checks numbers in Guide's answers against the radar files |
+| `frontend/ai_bridge.py` | Turns a checked model reply into the chat card |
+| `frontend/style.css` | Map overlay and landing-page layout |
+| `pipeline/water_mask.py` | Radar scene to a water mask and GeoJSON |
+| `pipeline/analyze.py` | Extra water and lifeline distances |
+| `pipeline/ice.py` | Ice-jam detector |
+| `pipeline/archive.py` | Search and download any box from the public RCM archive |
+| `pipeline/get_ard_baseline.py` | List and download Albany scenes |
+| `pipeline/run_project.py` | Run one saved project end to end |
+| `ai/llm.py` | Questions, audience alerts, situation report |
+| `ai/inference.py` | One-call checked answers, knowledge search, disk cache |
+| `ai/alerts.py` | Plain-language alert writer. `python ai/alerts.py <folder>` |
+| `api/main.py` | FastAPI routes |
+| `api/data.py` | Reads `data/real` for the API |
+| `data/real/` | Albany results used by the API and the original pipeline commands |
+| `data/projects/` | Saved projects. Albany is `albany-2025` |
+| `data/knowledge/` | Short sourced notes the assistant can search |
+| `outputs/flood_story.png` | Before/after figure |
+| `outputs/ice_jam.png` | Frozen river on Apr 30 against open water on May 7 |
+| `outputs/ice_timeline.png` | Apr 1, Apr 30, May 7, May 19 |
+
+The raw radar scenes are not in git. `get_ard_baseline.py` or the landing-page search can fetch the AWS scenes again. Apr 30 still requires the EODMS order.
+
+## Limits
+
+- Apr 30 is uncalibrated and was shifted about 40 m (`--shift-px 2,0`) so it lines up. Some upstream ice it flags can be noise because the picture is grainier.
+- Ice is not counted as open water. On Apr 30 the river beside the towns was still frozen, so the red flood extent understates the water that was there.
+- Distances count open water, river ice, and the normal channel. A frozen river is still the river. The open-water-only distance is saved as `dist_open_water_m`.
+- Red away from the channel can be meltwater, wet snow, or radar speckle. The red along the river is the part to use.
+- Causeway and town-centre points are approximate unless a lifeline is marked verified.
+- The normal day is August 2025, after the flood, because the free archive has no earlier summer.
+- Nov–Apr water maps can over-count because wet snow and frozen bogs look dark.
+- The ice-jam rule needs community lifelines. Without them you only get a frozen-fraction.
+- Guide and the audience alerts will not invent a number that is not in the loaded files. If the model is unavailable they fall back to the template text.
