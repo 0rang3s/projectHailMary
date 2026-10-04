@@ -4,6 +4,16 @@ RCM FloodScope maps river floods from Canada's RADARSAT Constellation Mission (R
 
 It was built for Mission Accepted, Challenge 3. The worked example is the spring 2025 Albany River flood at Fort Albany and Kashechewan, two fly-in First Nations on James Bay. The same app can open any other place in Canada that the free RCM archive covers, or a pair of radar images you upload yourself.
 
+## A quick look
+
+The projects page. Open a saved project, or start a new one by picking a place in Canada or uploading your own radar images.
+
+![Projects page](docs/screenshots/projects.png)
+
+The Albany River on April 30, 2025. Red is extra water, light blue is river ice, and the dots are lifelines coloured by how close the water is. The Guide panel on the right answers questions from the radar results.
+
+![Albany River map on April 30, 2025](docs/screenshots/albany-map.jpg)
+
 ## Team
 
 - Aryan Shashikumar Srivastava
@@ -48,6 +58,8 @@ cp .env.example .env
 ```
 
 Put a Groq key in `.env` if you want the model. The file is gitignored.
+
+To get a free key, sign up at [console.groq.com](https://console.groq.com), open **API Keys**, click **Create API Key**, and copy it (it is only shown once). Paste it after `GROQ_API_KEY=` and leave the two model lines as they are. Never commit the key.
 
 ```
 GROQ_API_KEY=
