@@ -3,9 +3,10 @@ CUT OFF dashboard.
 
     streamlit run frontend/app.py
 
-One page for the Albany River flood. Every number comes from data/real
-(stats, ice, lifelines, alerts, and the water / ice GeoJSON). August 7 is the
-summer baseline already used by those files.
+Opens on the landing page (saved projects + upload new radar images).
+Opening a project sets ?project=<slug>, and every number on the map page then comes from
+data/projects/<slug>/ (stats, ice, lifelines, alerts, and the water / ice GeoJSON).
+?project=real shows the original data/real folder.
 
 Ask Cut Off uses api/llm.py from the shared assistant. With GROQ_API_KEY in
 .env it looks up dates through that tool-using model. Without a key it still
@@ -13,6 +14,7 @@ answers from the files loaded on this page.
 """
 import html
 import json
+import math
 import os
 import glob
 import sys
@@ -32,6 +34,9 @@ REAL = os.path.join(ROOT, "data", "real")
 HERE = os.path.dirname(os.path.abspath(__file__))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+import projects  # noqa: E402  landing page + saved projects
 try:
     from dotenv import load_dotenv
     load_dotenv(os.path.join(ROOT, ".env"))
@@ -44,6 +49,7 @@ try:
     generate_alert = llm_mod.generate_alert
     situation_report = llm_mod.situation_report
 except Exception as exc:
+    llm_mod = None
     print("AI module unavailable:", type(exc).__name__, exc)
     ask_model = ask_with_data = generate_alert = situation_report = None
 if HERE not in sys.path:
@@ -1169,11 +1175,83 @@ def show_map(scene, normal_path, normal_date, date_count):
         st.caption("Summer baseline. Additional water and river ice are drawn on the flood dates.")
 
 
+def open_project():
+    """Pick the project from the URL. None = show the landing page."""
+    global REAL
+    slug = st.query_params.get("project")
+    if not slug:
+        return None
+    if slug == "real":
+        folder, proj = os.path.join(ROOT, "data", "real"), dict(LEGACY)
+    else:
+        folder = os.path.join(projects.PROJECTS, slug)
+        proj = projects.read_project(slug)
+        if proj is None or os.path.basename(folder) != slug:
+            st.query_params.clear()
+            st.rerun()
+    REAL = folder
+    try:
+        import api.data as data_mod
+        from pathlib import Path
+        data_mod.REAL = Path(folder)
+    except Exception:
+        pass
+    if llm_mod is not None and hasattr(llm_mod, "set_project"):
+        llm_mod.set_project(proj.get("llm_place") or f"the flood in the radar project \"{proj.get('name', slug)}\"",
+                            proj.get("normal_date"))
+    if st.session_state.get("open_slug") != slug:
+        for key in ("date", "date_label", "lifeline", "map_center", "map_zoom", "chat", "alerts", "report_text"):
+            st.session_state.pop(key, None)
+        st.session_state.open_slug = slug
+    return proj
+
+
+# The original data/real folder, as if it were a project (?project=real).
+LEGACY = {
+    "name": "Albany River (data/real)", "title": "Albany River", "badge": "RCM · Spring 2025",
+    "map_center": [52.24, -81.70], "map_zoom": 12,
+    "phases": {"2025-04-30": ["Emergency", "#d7301f"], "2025-05-07": ["River opening", "#e06a12"],
+               "2025-05-19": ["Water receding", "#c48a12"], "2025-08-07": ["Normal baseline", "#2f6fad"]},
+    "note": "April 30 is a different radar product. Ice-covered river is not counted as open water. "
+            "August 7 is the summer comparison.",
+}
+
+
+def view_for(proj, timeline):
+    """Map centre/zoom, title and badge for a project."""
+    if proj.get("map_center"):
+        center, zoom = list(proj["map_center"]), int(proj.get("map_zoom", 12))
+    elif proj.get("aoi_lonlat"):
+        w, s, e, n = proj["aoi_lonlat"]
+        center = [(s + n) / 2, (w + e) / 2]
+        span = max(e - w, (n - s) * 1.6, 1e-3)
+        zoom = int(max(6, min(14, round(math.log2(360 / span * 1500 / 256)))))
+    else:
+        center, zoom = [56.0, -96.0], 4
+    title = proj.get("title") or proj.get("name") or "Project"
+    if proj.get("badge"):
+        badge = proj["badge"]
+    else:
+        floods = [d for d in timeline if d != proj.get("normal_date")] or timeline
+        a, b = datetime.fromisoformat(floods[0]), datetime.fromisoformat(floods[-1])
+        span = a.strftime("%b %Y") if (a.year, a.month) == (b.year, b.month) else \
+            (f"{a:%b}–{b:%b %Y}" if a.year == b.year else f"{a:%b %Y}–{b:%b %Y}")
+        badge = f"RCM · {span}"
+    return center, zoom, title, badge
+
+
 def main():
+    proj = open_project()
+    if proj is None:
+        projects.landing()
+        return
     normal_files = sorted(glob.glob(os.path.join(REAL, "normal_*_water.geojson")))
     dates = sorted(os.path.basename(os.path.dirname(p)) for p in glob.glob(os.path.join(REAL, "*", "stats.json")))
     if not dates or not normal_files:
-        st.error("No processed dates in data/real. Run the pipeline first (see README).")
+        st.error("This project has no processed dates yet. Go back and run it.")
+        if st.button("← Projects"):
+            st.query_params.clear()
+            st.rerun()
         st.stop()
 
     normal_path = normal_files[0]
@@ -1182,18 +1260,17 @@ def main():
     normal_km = floods[0]["stats"].get("normal_water_km2")
     scenes = floods + [load_baseline(normal_date, normal_km, floods[0]["lifelines"])]
     timeline = [scene["date"] for scene in scenes]
+    center, zoom, title, badge = view_for(proj, timeline)
 
     if st.session_state.get("date") not in timeline:
         st.session_state.date = timeline[0]
     st.session_state.setdefault("lifeline", None)
-    st.session_state.setdefault("map_center", [52.24, -81.70])
-    st.session_state.setdefault("map_zoom", 12)
+    st.session_state.setdefault("map_center", center)
+    st.session_state.setdefault("map_zoom", zoom)
     st.session_state.setdefault("ai_open", True)
     st.session_state.setdefault("chat", [])
     st.session_state.setdefault("alerts", {})
 
-    years = sorted({date[:4] for date in timeline})
-    year_span = years[0] if len(years) == 1 else f"{years[0]}–{years[-1]}"
     show(f"""
     <style>
     div[data-testid="stHorizontalBlock"]:has(.date-dock) {{
@@ -1203,9 +1280,9 @@ def main():
     <div class="top">
       <div>
         <div class="brand">CUT OFF</div>
-        <div class="title">Albany River</div>
+        <div class="title">{html.escape(title)}</div>
       </div>
-      <div class="badge">RCM · {html.escape(year_span)}</div>
+      <div class="badge">{html.escape(badge)}</div>
     </div>
     """)
 
@@ -1237,6 +1314,11 @@ def main():
     side, chat_col = columns([1, 1])
     with side:
         show("<div class='panel-left'></div><div class='grip grip-right' title='Drag this edge to widen'></div>")
+        if button("← All projects", key="back-projects"):
+            st.query_params.clear()
+            st.rerun()
+        for warning in proj.get("warnings") or []:
+            show(f"<p class='note'>⚠ {html.escape(warning)}</p>")
         show(f"""
         <div class="stage" style="--c:{accent}">
           <div class="kicker">{live}</div>
@@ -1248,6 +1330,8 @@ def main():
         show("<div class='h'>Closest to the water</div>")
         show("<p class='guide'>Red is within 200 m. Yellow is within 1 km.</p>")
         lines = closest(scene["lifelines"]) or scene["lifelines"]
+        if not lines:
+            show("<p class='guide'>No lifelines in this project. Add some when you create a project to get distances.</p>")
         for index, line in enumerate(lines):
             lifeline_card(line, line["id"] == st.session_state.lifeline, scene["baseline"], index)
             viewing = line["id"] == st.session_state.lifeline
@@ -1262,7 +1346,7 @@ def main():
         show("<div class='h'>River ice</div>")
         show("<p class='guide'>Frozen beside the towns and open upstream is the jam pattern.</p>")
         ice_card(scene)
-        show("<div class='h'>Across the spring</div>")
+        show("<div class='h'>Across the dates</div>")
         show("<p class='guide'>Click a bar to open that day.</p>")
         picked = draw_charts(scenes, scene["date"], height=180)
         by_label = {label_for(item["date"], timeline): item["date"] for item in scenes}
@@ -1270,7 +1354,9 @@ def main():
             st.session_state.date = by_label[picked]
             st.session_state.sync_slider = picked
             st.rerun()
-        show(f"<p class='note'>Flood dates are measured against the normal water on {html.escape(long_date(normal_date))}. Ice-covered river is not counted as open water.</p>")
+        note = proj.get("note") or (f"Flood dates are measured against the normal water on "
+                                    f"{long_date(normal_date)}. Ice-covered river is not counted as open water.")
+        show(f"<p class='note'>{html.escape(note)}</p>")
     with chat_col:
         chat_panel(scene, scenes)
 

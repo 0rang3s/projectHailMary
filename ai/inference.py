@@ -438,6 +438,15 @@ Question: How were people affected?
 Question: Will it flood next year?
 {"summary": "Radar results cover past scan dates only and cannot predict future flooding. They show Lifeline A 150 m from detected water on 2025-05-19.", "claims": [], "not_known": ["Radar shows where water was on a scan date, not what happens next."]}
 """.strip()
+_BASE_SYSTEM = SYSTEM
+_ALBANY_INTRO = "the spring 2025 Albany River ice-jam flood at Fort Albany and\nKashechewan"
+
+
+def set_place(place):
+    """Swap the Albany story for another project's (the rest of the rules stay the same)."""
+    global SYSTEM
+    albany = place.startswith("the spring 2025 Albany River")
+    SYSTEM = _BASE_SYSTEM if albany else _BASE_SYSTEM.replace(_ALBANY_INTRO, place)
 
 # ---------------------------------------------------------------- validation
 

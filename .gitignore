@@ -12,3 +12,7 @@ data/index/
 *.bak
 __pycache__/
 .env
+# Uploaded projects: keep results, not the big radar files
+data/projects/_staging/
+data/projects/*/inputs/
+data/projects/*/*.tif

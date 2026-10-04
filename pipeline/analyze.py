@@ -27,6 +27,13 @@ COAST_X = 461000                     # UTM 17N easting; east of this is James Ba
 
 
 
+def configure(crs=None, coast_x="keep"):
+    """Used by run_project.py. coast_x=None turns the James Bay clip off."""
+    global CRS, COAST_X
+    if crs: CRS = crs
+    if coast_x != "keep": COAST_X = coast_x
+
+
 def has_data(mask_path, x, y):
     with rasterio.open(mask_path) as src:
         r, c = src.index(x, y)
@@ -55,7 +62,8 @@ def main(normal_p, flood_p, mask_p, lifelines_p, out_dir, mock=False):
     # Leave James Bay out: coastal flats and breaking sea ice there are not river flooding.
     from shapely.geometry import box
     xmin, ymin, xmax, ymax = extra_gdf.total_bounds if len(extra_gdf) else (0, 0, 1, 1)
-    extra_gdf["geometry"] = extra_gdf.intersection(box(min(xmin, 0), min(ymin, 0), COAST_X, max(ymax, 1e8)))
+    if COAST_X is not None:
+        extra_gdf["geometry"] = extra_gdf.intersection(box(min(xmin, 0), min(ymin, 0), COAST_X, max(ymax, 1e8)))
     # Clipping can leave mixed shapes (polygon + line scraps); keep polygons only so maps can draw them.
     extra_gdf = extra_gdf.explode(index_parts=False)
     extra_gdf = extra_gdf[extra_gdf.geom_type == "Polygon"]

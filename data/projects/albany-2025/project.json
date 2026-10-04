@@ -1,0 +1,106 @@
+{
+  "name": "Albany River, spring 2025",
+  "description": "Fort Albany & Kashechewan ice-jam flood. Settings tuned by hand and checked against news reports.",
+  "crs": "EPSG:32617",
+  "bounds_xy": [
+    405000,
+    5762000,
+    470000,
+    5812000
+  ],
+  "res_m": 20,
+  "coast_x": 461000,
+  "images": [
+    {
+      "date": "2025-08-07",
+      "role": "normal",
+      "file": "inputs/2025-08-07.tif",
+      "threshold_db": -20,
+      "kind": "ard",
+      "water_km2": 146.54
+    },
+    {
+      "date": "2025-04-30",
+      "role": "flood",
+      "file": "inputs/2025-04-30.tif",
+      "threshold_db": 47.5,
+      "shift_px": [
+        2,
+        0
+      ],
+      "ice_threshold_db": 49.5,
+      "ice_median": 7,
+      "kind": "grd",
+      "water_km2": 109.92
+    },
+    {
+      "date": "2025-05-07",
+      "role": "flood",
+      "file": "inputs/2025-05-07.tif",
+      "threshold_db": -20,
+      "kind": "ard",
+      "water_km2": 186.07,
+      "shift_px": [
+        0,
+        0
+      ]
+    },
+    {
+      "date": "2025-05-19",
+      "role": "flood",
+      "file": "inputs/2025-05-19.tif",
+      "threshold_db": -20,
+      "kind": "ard",
+      "water_km2": 171.98,
+      "shift_px": [
+        0,
+        0
+      ]
+    }
+  ],
+  "status": "done",
+  "error": null,
+  "warnings": [
+    "2025-04-30 is in snow season. Wet snow can look like water, so extra water may be too high. The river-ice check still works."
+  ],
+  "aoi_lonlat": [
+    -82.41439,
+    51.9926,
+    -81.53023,
+    52.4575
+  ],
+  "normal_date": "2025-08-07",
+  "flood_dates": [
+    "2025-04-30",
+    "2025-05-07",
+    "2025-05-19"
+  ],
+  "finished": "2026-10-03T20:10:37",
+  "title": "Albany River",
+  "badge": "RCM \u00b7 Spring 2025",
+  "map_center": [
+    52.24,
+    -81.7
+  ],
+  "map_zoom": 12,
+  "phases": {
+    "2025-04-30": [
+      "Emergency",
+      "#d7301f"
+    ],
+    "2025-05-07": [
+      "River opening",
+      "#e06a12"
+    ],
+    "2025-05-19": [
+      "Water receding",
+      "#c48a12"
+    ],
+    "2025-08-07": [
+      "Normal baseline",
+      "#2f6fad"
+    ]
+  },
+  "note": "April 30 is a different radar product. Ice-covered river is not counted as open water. August 7 is the summer comparison.",
+  "llm_place": "the spring 2025 Albany River ice-jam flood at Fort Albany and Kashechewan"
+}

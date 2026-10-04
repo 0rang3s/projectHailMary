@@ -8,7 +8,7 @@ import re
 import time
 from typing import Iterable
 
-from alert.generate_alert import template_alert
+from ai.alerts import template_alert
 from api.data import (
     DataError,
     compare,
@@ -61,6 +61,31 @@ REPORT_SYSTEM = (
     "patches of red away from the river can be meltwater, wet snow, or radar noise. "
     "Do not invent other limitations, places, or causes. Plain language."
 )
+
+# Albany is the default story. set_project() swaps the place and the Albany-only notes
+# when the dashboard opens a different uploaded project.
+ALBANY_PLACE = "the spring 2025 Albany River ice-jam flood at Fort Albany and Kashechewan"
+_ALBANY_BRIEF_NOTE = "April 30 is a different uncalibrated radar product. August 7 is the summer baseline, so extra water is 0. "
+_ALBANY_REPORT_NOTE = ("the April 30 scene is a different uncalibrated product and was shifted about 40 m to line up; "
+                       "the normal day is the summer after the flood because the free archive starts in spring 2025; ")
+_BASE_PROMPTS = {"ASK_SYSTEM": ASK_SYSTEM, "BRIEF_SYSTEM": BRIEF_SYSTEM, "REPORT_SYSTEM": REPORT_SYSTEM}
+PLACE = ALBANY_PLACE
+
+
+def set_project(place=None, normal_date=None):
+    """Point the prompts at a project. place=None means the original Albany story."""
+    global ASK_SYSTEM, BRIEF_SYSTEM, REPORT_SYSTEM, PLACE
+    PLACE = place or ALBANY_PLACE
+    albany = PLACE == ALBANY_PLACE
+    out = {}
+    for key, text in _BASE_PROMPTS.items():
+        text = text.replace(ALBANY_PLACE, PLACE)
+        if not albany:
+            base = f"{normal_date} is the normal baseline, so extra water is 0. " if normal_date else ""
+            text = text.replace(_ALBANY_BRIEF_NOTE, base).replace(_ALBANY_REPORT_NOTE, "")
+        out[key] = text
+    ASK_SYSTEM, BRIEF_SYSTEM, REPORT_SYSTEM = out["ASK_SYSTEM"], out["BRIEF_SYSTEM"], out["REPORT_SYSTEM"]
+
 
 AUDIENCE = {
     "coordinator": (
@@ -321,7 +346,7 @@ def template_report() -> str:
     lines = [
         "# Cut Off situation report",
         "",
-        "Radar view of the spring 2025 Albany River ice-jam flood at Fort Albany and Kashechewan First Nations. "
+        f"Radar view of {PLACE}. "
         "Every figure below is from a RADARSAT Constellation Mission scene.",
         "",
         "## What happened",

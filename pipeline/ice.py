@@ -35,6 +35,13 @@ JAM_NEAR_MIN = 70         # % frozen near a town to count as jammed
 JAM_UP_MAX = 40           # % frozen upstream to count as "open, water still coming"
 
 
+def configure(crs=None, coast_x="keep"):
+    """Used by run_project.py. coast_x=None turns the James Bay clip off."""
+    global CRS, COAST_X
+    if crs: CRS = crs
+    if coast_x != "keep": COAST_X = coast_x
+
+
 def main(normal_mask, flood_mask, lifelines_p, out_dir, db=None, ice_threshold=None, median=7):
     with rasterio.open(normal_mask) as src:
         nm = src.read(1); T = src.transform; px = abs(T.a * T.e)
@@ -54,7 +61,8 @@ def main(normal_mask, flood_mask, lifelines_p, out_dir, db=None, ice_threshold=N
     river = binary_erosion(river, iterations=1)
     rows, cols = np.indices(river.shape)
     X = T.c + (cols + 0.5) * T.a; Y = T.f + (rows + 0.5) * T.e
-    river &= X < COAST_X
+    if COAST_X is not None:
+        river &= X < COAST_X
 
     # 2. on the flood date: inside the river, not water = ice
     seen = river & (fm != 255)
@@ -72,10 +80,10 @@ def main(normal_mask, flood_mask, lifelines_p, out_dir, db=None, ice_threshold=N
         zones[t["name"]] = {"river_km2_seen": float(round(near.sum() * px / 1e6, 2)),
                             "pct_frozen": int(round(100 * (ice & near).sum() / near.sum())) if near.sum() else None}
     up = seen & (dist_to_any > UPSTREAM_M)
-    up_pct = int(round(100 * (ice & up).sum() / up.sum())) if up.sum() else None
+    up_pct = int(round(100 * (ice & up).sum() / up.sum())) if towns and up.sum() else None
 
     jam_towns = [n for n, z in zones.items() if z["pct_frozen"] is not None and z["pct_frozen"] >= JAM_NEAR_MIN]
-    jam = bool(jam_towns and up_pct is not None and up_pct <= JAM_UP_MAX)
+    jam = bool(jam_towns and up_pct is not None and up_pct <= JAM_UP_MAX) if towns else None   # no towns = no verdict
     stats = {
         "river_km2_seen": float(round(seen.sum() * px / 1e6, 1)),
         "pct_frozen_overall": int(round(100 * ice.sum() / seen.sum())) if seen.sum() else None,

@@ -60,7 +60,7 @@ def revision() -> str:
     if REAL.is_dir():
         for path in REAL.rglob("*.json"):
             latest = max(latest, path.stat().st_mtime_ns)
-    return str(latest)
+    return f"{REAL}:{latest}"   # folder too, so switching projects never reuses old answers
 
 
 def normalize_date(raw: str) -> str:

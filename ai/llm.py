@@ -62,6 +62,30 @@ REPORT_SYSTEM = (
     "Do not invent other limitations, places, or causes. Plain language."
 )
 
+# Albany is the default story. set_project() swaps the place and the Albany-only notes
+# when the dashboard opens a different project.
+ALBANY_PLACE = "the spring 2025 Albany River ice-jam flood at Fort Albany and Kashechewan"
+_ALBANY_REPORT_NOTE = ("the April 30 scene is a different uncalibrated product and was shifted about 40 m to line up; "
+                       "the normal day is the summer after the flood because the free archive starts in spring 2025; ")
+_BASE_PROMPTS = {"ASK_SYSTEM": ASK_SYSTEM, "REPORT_SYSTEM": REPORT_SYSTEM}
+PLACE = ALBANY_PLACE
+
+
+def set_project(place=None, normal_date=None):
+    """Point the prompts at a project. place=None means the original Albany story."""
+    global ASK_SYSTEM, REPORT_SYSTEM, PLACE
+    PLACE = place or ALBANY_PLACE
+    albany = PLACE == ALBANY_PLACE
+    out = {}
+    for key, text in _BASE_PROMPTS.items():
+        text = text.replace(ALBANY_PLACE, PLACE)
+        if not albany:
+            text = text.replace(_ALBANY_REPORT_NOTE, "")
+        out[key] = text
+    ASK_SYSTEM, REPORT_SYSTEM = out["ASK_SYSTEM"], out["REPORT_SYSTEM"]
+    inference.set_place(PLACE)
+
+
 AUDIENCE = {
     "coordinator": (
         "Write for an emergency coordinator. Lead with an ice-jam warning when jam_risk is true, "
@@ -513,7 +537,7 @@ def template_report() -> str:
     lines = [
         "# Cut Off situation report",
         "",
-        "Radar view of the spring 2025 Albany River ice-jam flood at Fort Albany and Kashechewan First Nations. "
+        f"Radar view of {PLACE}. "
         "Every figure below is from a RADARSAT Constellation Mission scene.",
         "",
         "## What happened",
