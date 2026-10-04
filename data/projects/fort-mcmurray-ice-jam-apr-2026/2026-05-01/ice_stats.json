@@ -1,0 +1,9 @@
+{
+  "river_km2_seen": 18.5,
+  "pct_frozen_overall": 43,
+  "near_towns": {},
+  "upstream_pct_frozen": null,
+  "jam_risk": null,
+  "jam_towns": [],
+  "rule": "jam risk = river within 5 km of a town >= 70% frozen while river > 15 km away <= 40% frozen"
+}

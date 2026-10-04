@@ -1,0 +1,46 @@
+{
+  "name": "Fort McMurray ice jam, Apr 2026",
+  "description": "",
+  "source": "RCM ARD archive (AWS)",
+  "created": "2026-10-03T20:56:17",
+  "status": "done",
+  "aoi_lonlat": [
+    -111.6472,
+    56.5523,
+    -111.0728,
+    56.8677
+  ],
+  "images": [
+    {
+      "date": "2025-07-05",
+      "role": "normal",
+      "file": "inputs/2025-07-05.tif",
+      "scene_id": "b8f2dd41-1c8c-44ed-8f85-9ae3c5790b2e",
+      "kind": "ard",
+      "threshold_db": -20.0,
+      "water_km2": 25.09
+    },
+    {
+      "date": "2026-05-01",
+      "role": "flood",
+      "file": "inputs/2026-05-01.tif",
+      "scene_id": "6b66e9ce-65bb-4af4-be33-61ba6d964df2",
+      "kind": "ard",
+      "threshold_db": -20.0,
+      "water_km2": 20.11,
+      "shift_px": [
+        0,
+        0
+      ]
+    }
+  ],
+  "error": null,
+  "warnings": [],
+  "crs": "EPSG:32612",
+  "res_m": 20,
+  "normal_date": "2025-07-05",
+  "flood_dates": [
+    "2026-05-01"
+  ],
+  "finished": "2026-10-03T20:56:20"
+}
