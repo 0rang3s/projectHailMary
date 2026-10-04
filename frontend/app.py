@@ -1,5 +1,5 @@
 """
-CUT OFF dashboard.
+RCM FloodScope dashboard.
 
     streamlit run frontend/app.py
 
@@ -8,7 +8,7 @@ Opening a project sets ?project=<slug>, and every number on the map page then co
 data/projects/<slug>/ (stats, ice, lifelines, alerts, and the water / ice GeoJSON).
 ?project=real shows the original data/real folder.
 
-Ask Cut Off uses api/llm.py from the shared assistant. With GROQ_API_KEY in
+Ask RCM FloodScope uses api/llm.py from the shared assistant. With GROQ_API_KEY in
 .env it looks up dates through that tool-using model. Without a key it still
 answers from the files loaded on this page.
 """
@@ -79,7 +79,7 @@ AUDIENCES = (
     ("pilots", "Pilots"),
 )
 
-st.set_page_config(page_title="CUT OFF", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="RCM FloodScope", layout="wide", initial_sidebar_state="collapsed")
 # Styles live in style.css so the page layout stays in this file.
 st.markdown(f"<style>{open(os.path.join(HERE, 'style.css'), encoding='utf-8').read()}</style>", unsafe_allow_html=True)
 
@@ -797,13 +797,13 @@ def metric_strip(scene):
         else:
             tiles.append(("ice", "—", "River ice"))
             tiles.append(("up", "—", "Frozen upstream"))
-    cols = columns(len(tiles))
-    for col, (kind, value, label), wait in zip(cols, tiles, (0, 0.05, 0.1)):
-        with col:
-            show(
-                f"<div class='tile {kind}' style='animation-delay:{wait}s'>"
-                f"<b>{html.escape(value)}</b><span>{html.escape(label)}</span></div>"
-            )
+    cards = []
+    for (kind, value, label), wait in zip(tiles, (0, 0.05, 0.1, 0.15)):
+        cards.append(
+            f"<div class='tile {kind}' style='animation-delay:{wait}s'>"
+            f"<b>{html.escape(value)}</b><span>{html.escape(label)}</span></div>"
+        )
+    show(f"<div class='tiles'>{''.join(cards)}</div>")
 
 
 def story_line(scene, normal_date):
@@ -914,8 +914,7 @@ def remember_answer(question, scene, scenes):
     history = [{"role": item["role"], "content": item["content"]} for item in st.session_state.chat][-8:]
     if history and history[-1]["content"] == question:
         history = history[:-1]
-    with st.spinner("Reading the radar results…"):
-        result = respond(question, scene, scenes, history)
+    result = respond(question, scene, scenes, history)
     tools = [tool.get("name", "") for tool in result.get("tools_used") or [] if isinstance(tool, dict)]
     answer = result.get("answer") or "No answer came back."
     facts, derived = radar_facts(facts_stamp())
@@ -974,20 +973,18 @@ def check_badge(check):
 
 @st.fragment
 def chat_panel(scene, scenes):
-    pending = st.session_state.pop("pending_q", "")
-    if pending:
-        remember_answer(pending, scene, scenes)
+    pending = st.session_state.get("pending_q", "")
 
     configured = bool(os.environ.get("GROQ_API_KEY")) and ask_model is not None
-    intro = ("Answers use only the radar results. A reply can take a moment."
+    intro = ("You're chatting with an AI. It answers only from the radar results, and a reply can take a moment."
              if configured else
-             "Answers use the radar results on this page. A reply can take a moment.")
+             "You're chatting with an AI. It answers from the radar results on this page, and a reply can take a moment.")
     show("<div class='grip grip-left' title='Drag this edge to widen'></div>")
     show(f"<div class='drawer-title guide-name'><b>Guide</b><span>{html.escape(intro)}</span></div>")
     show("<div class='guide-close'><div class='guide-hide' role='button' tabindex='0'>Close</div></div>")
     show_checks = st.toggle("Number check on answers", value=True, key="show-checks",
                             help="Checks every number in Guide's answer against the radar files.")
-    if st.session_state.chat:
+    if st.session_state.chat or pending:
         bits = ["<div class='thread'>"]
         for message in st.session_state.chat:
             role = message["role"]
@@ -1012,17 +1009,23 @@ def chat_panel(scene, scenes):
             else:
                 body = html.escape(message["content"]).replace("\n", "<br>")
             bits.append(f"<div class='bubble {role}'>{body}{chips}{badge}</div>")
+        if pending:
+            bits.append(
+                "<div class='bubble assistant thinking' role='status' aria-label='Writing a reply'>"
+                "<span class='ai-spark'></span><span class='ai-spark sm'></span></div>"
+            )
         bits.append("</div>")
         show("".join(bits))
     else:
-        show("<p class='note'>Ask Guide about the water, the ice, or a lifeline.</p>")
+        show("<p class='note'>Ask the AI about the water, the ice, or a lifeline.</p>")
 
     with st.form("ask-form", clear_on_submit=True):
-        typed = st.text_input("Ask about this flood", placeholder="Ask about this flood", label_visibility="collapsed")
+        typed = st.text_input("Ask the AI about this flood", placeholder="Ask the AI about this flood", label_visibility="collapsed")
         submitted = st.form_submit_button("Send")
     if submitted and typed.strip():
         st.session_state.chat.append({"role": "user", "content": typed.strip()})
         st.session_state.pending_q = typed.strip()
+        st.session_state.answer_phase = "show"
         st.rerun(scope="fragment")
 
     show("<div class='drawer-title'><b>Alert for this date</b></div>")
@@ -1040,23 +1043,54 @@ def chat_panel(scene, scenes):
         cache_key = f"{scene['date']}:{audience}"
         if cache_key not in st.session_state.alerts:
             with st.spinner("Writing the alert…"):
-                st.session_state.alerts[cache_key] = generate_alert(scene["date"], audience)
+                try:
+                    st.session_state.alerts[cache_key] = llm_mod.phrase_alert(
+                        audience, scene["stats"], scene["lifelines"], scene.get("ice"),
+                    )
+                except Exception as exc:
+                    print("alert failed:", exc)
+                    st.session_state.alerts[cache_key] = {
+                        "text": llm_mod.template_for_audience(
+                            audience, scene["stats"], scene["lifelines"], scene.get("ice"),
+                        ),
+                    }
         cached = st.session_state.alerts.get(cache_key)
         if cached:
-            source = "AI" if cached.get("source") == "llm" else "template"
-            show(f"<div class='alert-copy'>{html.escape(cached.get('text') or '')}"
-                 f"<span>source: {html.escape(source)}</span></div>")
+            show(f"<div class='alert-copy'>{html.escape(cached.get('text') or '')}</div>")
 
-    if situation_report is not None and button("Download situation report", key="report-build"):
-        with st.spinner("Preparing the report…"):
-            st.session_state.report_text = situation_report()
-    if st.session_state.get("report_text"):
-        st.download_button(
-            "Save report",
-            data=st.session_state.report_text,
-            file_name="cut-off-situation-report.md",
-            mime="text/markdown",
-        )
+    floods = [item for item in scenes if not item.get("baseline")]
+    if floods and llm_mod is not None and hasattr(llm_mod, "report_markdown"):
+        packs = [(item["date"], item["stats"], item["lifelines"], item.get("ice")) for item in floods]
+        normal = floods[0]["stats"].get("normal_date") or ""
+        place = st.session_state.get("report_place") or "this radar project"
+        report = llm_mod.report_markdown(packs, normal, place)
+        try:
+            st.download_button(
+                "Download situation report",
+                data=report,
+                file_name="rcm-floodscope-situation-report.md",
+                mime="text/markdown",
+                key="report-download",
+                width="stretch",
+            )
+        except TypeError:
+            st.download_button(
+                "Download situation report",
+                data=report,
+                file_name="rcm-floodscope-situation-report.md",
+                mime="text/markdown",
+                key="report-download",
+                use_container_width=True,
+            )
+
+    if pending and st.session_state.get("answer_phase") == "show":
+        st.session_state.answer_phase = "run"
+        st.rerun(scope="fragment")
+    elif pending:
+        remember_answer(pending, scene, scenes)
+        st.session_state.pop("pending_q", None)
+        st.session_state.pop("answer_phase", None)
+        st.rerun(scope="fragment")
 
 
 def arm_panels():
@@ -1107,6 +1141,7 @@ def arm_panels():
               col.style.setProperty('max-width', w + 'px', 'important');
               col.style.setProperty('flex', 'none', 'important');
               localStorage.setItem(key, String(Math.round(w)) + 'px');
+              place();
             }
             function up(ev) {
               zone.removeEventListener('pointermove', move);
@@ -1117,8 +1152,38 @@ def arm_panels():
             zone.addEventListener('pointerup', up);
           });
         }
+        function place() {
+          const head = doc.querySelector('.top');
+          const left = doc.querySelector('[data-testid="stColumn"]:has(.panel-left)');
+          const row = left && left.closest('[data-testid="stHorizontalBlock"]');
+          if (!head || !left || !row) return;
+          const width = Math.round(left.getBoundingClientRect().width);
+          if (width > 40) head.style.setProperty('width', width + 'px', 'important');
+          const shift = Math.max(0, Math.ceil(head.getBoundingClientRect().bottom + 8 - row.getBoundingClientRect().top));
+          left.style.setProperty('top', shift + 'px', 'important');
+        }
+        function quietMap() {
+          doc.querySelectorAll('iframe').forEach(function (frame) {
+            if (frame.title && frame.title.indexOf('streamlit_folium') !== -1) frame.removeAttribute('title');
+          });
+        }
         restore('[data-testid="stColumn"]:has(.panel-left)', 'cutoff-left');
         restore('[data-testid="stColumn"]:has(.drawer-title)', 'cutoff-right');
+        place();
+        quietMap();
+        if (doc._cutoffWatch) doc._cutoffWatch.disconnect();
+        doc._cutoffWatch = new ResizeObserver(function () { place(); });
+        const head = doc.querySelector('.top');
+        const left = doc.querySelector('[data-testid="stColumn"]:has(.panel-left)');
+        if (head) doc._cutoffWatch.observe(head);
+        if (left) doc._cutoffWatch.observe(left);
+        if (doc._cutoffTitles) doc._cutoffTitles.disconnect();
+        doc._cutoffTitles = new MutationObserver(quietMap);
+        doc._cutoffTitles.observe(doc.body, {childList: true, subtree: true, attributes: true, attributeFilter: ['title']});
+        if (!doc.documentElement.getAttribute('data-cutoff-place')) {
+          doc.documentElement.setAttribute('data-cutoff-place', '1');
+          window.parent.addEventListener('resize', place);
+        }
         drag(doc.querySelector('.grip-right'), 'cutoff-left', true);
         drag(doc.querySelector('.grip-left'), 'cutoff-right', false);
         stretch(doc.querySelector('.grip-right'));
@@ -1197,8 +1262,9 @@ def open_project():
     except Exception:
         pass
     if llm_mod is not None and hasattr(llm_mod, "set_project"):
-        llm_mod.set_project(proj.get("llm_place") or f"the flood in the radar project \"{proj.get('name', slug)}\"",
-                            proj.get("normal_date"))
+        place = proj.get("llm_place") or f"the flood in the radar project \"{proj.get('name', slug)}\""
+        llm_mod.set_project(place, proj.get("normal_date"))
+        st.session_state.report_place = place
     if st.session_state.get("open_slug") != slug:
         for key in ("date", "date_label", "lifeline", "map_center", "map_zoom", "chat", "alerts", "report_text"):
             st.session_state.pop(key, None)
@@ -1279,7 +1345,7 @@ def main():
     </style>
     <div class="top">
       <div>
-        <div class="brand">CUT OFF</div>
+        <div class="brand">RCM FloodScope</div>
         <div class="title">{html.escape(title)}</div>
       </div>
       <div class="badge">{html.escape(badge)}</div>
@@ -1360,8 +1426,8 @@ def main():
     with chat_col:
         chat_panel(scene, scenes)
 
-    show_map(scene, normal_path, normal_date, len(timeline))
     arm_panels()
+    show_map(scene, normal_path, normal_date, len(timeline))
 
 
 def route_question(text):

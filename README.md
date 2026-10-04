@@ -1,4 +1,4 @@
-# Cut Off
+# RCM FloodScope
 
 Our project for Mission Accepted (Challenge 3). Basically, we use Canada's RADARSAT Constellation Mission (RCM) radar to map the spring 2025 Albany River flood and check how close the water got to Fort Albany and Kashechewan's lifelines: the airstrips, the causeway and the towns themselves.
 
@@ -36,9 +36,9 @@ pip install -r requirements.txt
 streamlit run frontend/app.py
 ```
 
-`frontend/app.py` is the dashboard (timeline, map, lifelines, ice, charts, and Ask Cut Off).
+`frontend/app.py` is the dashboard (timeline, map, lifelines, ice, charts, and Ask RCM FloodScope).
 
-Ask Cut Off answers from these radar files on its own. For the fuller assistant that looks up any date, copy `.env.example` to `.env` and add a `GROQ_API_KEY`. Alerts for coordinators, the community, and pilots, plus the situation report, work either way.
+Ask RCM FloodScope answers from these radar files on its own. For the fuller assistant that looks up any date, copy `.env.example` to `.env` and add a `GROQ_API_KEY`. Alerts for coordinators, the community, and pilots, plus the situation report, work either way.
 
 Use the slider at the top to move between dates. Blue is where water normally is, red is extra water on that date, and the dots are lifelines coloured by how close the water is (red means 200 m or less, yellow means within 1 km).
 

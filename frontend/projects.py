@@ -34,19 +34,17 @@ LANDING_CSS = """
 .stApp { color: #e2e8f0; }
 .block-container { max-width: 1100px !important; padding: 2.2rem 1.4rem 4rem !important; pointer-events: auto !important; margin: 0 auto; }
 .land-top { display: flex; align-items: baseline; gap: 14px; margin-bottom: 4px; }
-.land-top .brand { font-size: 1.9rem; font-weight: 800; letter-spacing: .08em; color: #f8fafc; }
+.land-top .brand { font-size: 1.55rem; font-weight: 800; letter-spacing: 0; color: #f8fafc; }
 .land-top .sub { color: #94a3b8; }
 .land-intro { color: #cbd5e1; max-width: 760px; margin: 2px 0 18px; line-height: 1.5; }
 .land-h { margin: 22px 0 8px; font-size: .78rem; font-weight: 700; letter-spacing: .12em; color: #7dd3fc; text-transform: uppercase; }
 .pcard { border: 1px solid rgba(125, 211, 252, .25); background: rgba(15, 23, 42, .85); border-radius: 14px; padding: 14px 16px 10px; margin-bottom: 6px; }
 .pcard b { font-size: 1.05rem; color: #f8fafc; }
 .pcard .meta { color: #94a3b8; font-size: .85rem; margin-top: 3px; }
-.pcard .desc { color: #cbd5e1; font-size: .9rem; margin-top: 6px; }
 .pill { display: inline-block; font-size: .7rem; font-weight: 700; letter-spacing: .06em; padding: 2px 8px; border-radius: 999px; margin-left: 8px; vertical-align: middle; }
 .pill.done { background: rgba(49, 163, 84, .2); color: #86efac; }
 .pill.running, .pill.new { background: rgba(250, 204, 21, .18); color: #fde68a; }
 .pill.error { background: rgba(215, 48, 31, .22); color: #fca5a5; }
-.pcard .warn { color: #fbbf24; font-size: .8rem; margin-top: 6px; }
 .pcard .err { color: #fca5a5; font-size: .85rem; margin-top: 6px; }
 .howto { color: #94a3b8; font-size: .88rem; line-height: 1.5; }
 /* The map page pins every map iframe full-screen. Undo that for the small picker map here. */
@@ -191,15 +189,10 @@ def project_card(slug, proj):
     floods = proj.get("flood_dates") or sorted(im["date"] for im in proj.get("images", []) if im.get("role") == "flood")
     normal = proj.get("normal_date") or next((im["date"] for im in proj.get("images", []) if im.get("role") == "normal"), "?")
     meta = f"{len(floods)} flood date{'s' if len(floods) != 1 else ''}: {', '.join(floods) or '—'} · normal day {normal}"
-    if proj.get("res_m"):
-        meta += f" · {proj['res_m']} m pixels"
-    warn = proj.get("warnings") or []
     body = f"""
     <div class="pcard">
       <b>{html.escape(proj.get('name', slug))}</b><span class="pill {html.escape(status)}">{html.escape(status.upper())}</span>
       <div class="meta">{html.escape(meta)}</div>
-      {f'<div class="desc">{html.escape(proj["description"])}</div>' if proj.get('description') else ''}
-      {f'<div class="warn">⚠ {len(warn)} warning{"s" if len(warn) != 1 else ""}: {html.escape(warn[0][:140])}</div>' if warn else ''}
       {f'<div class="err">{html.escape(str(proj.get("error")))}</div>' if status == "error" and proj.get("error") else ''}
     </div>
     """
@@ -357,8 +350,8 @@ def new_project_form():
 def landing():
     show(LANDING_CSS)
     show("""
-    <div class="land-top"><div class="brand">CUT OFF</div><div class="sub">Flood &amp; river-ice lifeline maps from RADARSAT radar</div></div>
-    <div class="land-intro">Pick any place in Canada (or upload your own radar images). Cut Off finds the water, compares each flood day to a
+    <div class="land-top"><div class="brand">RCM FloodScope</div><div class="sub">Flood &amp; river-ice lifeline maps from RADARSAT radar</div></div>
+    <div class="land-intro">Pick any place in Canada (or upload your own radar images). RCM FloodScope finds the water, compares each flood day to a
     normal day, spots river ice and ice-jam patterns, and measures how close the water gets to the places you care about.</div>
     """)
     left, right = st.columns([1.15, 1], gap="large")
@@ -388,7 +381,7 @@ def archive_section():
     st.session_state.setdefault("arc_lat", 52.24)
     st.session_state.setdefault("arc_lon", -81.70)
     st.session_state.setdefault("arc_km", 40)
-    show("""<div class='howto'>Pick a spot: type a place, click the map, or type coordinates. Cut Off searches Canada's
+    show("""<div class='howto'>Pick a spot: type a place, click the map, or type coordinates. RCM FloodScope searches Canada's
     free RCM radar archive (2025 onward) for that box, and downloads only that box.</div>""")
 
     c1, c2 = st.columns([3, 1])

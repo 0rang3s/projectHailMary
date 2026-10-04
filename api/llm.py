@@ -344,7 +344,7 @@ def template_report() -> str:
     packs = [(iso, get_stats(iso), get_lifelines(iso), get_ice(iso)) for iso in dates]
     first, last = packs[0], packs[-1]
     lines = [
-        "# Cut Off situation report",
+        "# RCM FloodScope situation report",
         "",
         f"Radar view of {PLACE}. "
         "Every figure below is from a RADARSAT Constellation Mission scene.",

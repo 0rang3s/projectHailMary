@@ -442,14 +442,10 @@ def infer(question: str, history: list[dict] | None = None, ui: dict | None = No
 
 # ---------------------------------------------------------------- alerts and report
 
-def generate_alert(date: str, audience: str) -> dict:
-    from api.data import resolve_flood_date
-
-    iso = resolve_flood_date(date)
-    stats = get_stats(iso)
-    lifelines = get_lifelines(iso)
-    ice = get_ice(iso)
-    key = (revision(), iso, audience)
+def phrase_alert(audience: str, stats: dict, lifelines: list, ice) -> dict:
+    """Write one audience alert from numbers already loaded. Does not look the date up again."""
+    lifelines = lifelines or []
+    key = (stats.get("flood_date"), audience, stats.get("extra_water_km2"), len(lifelines))
     if key in _alert_cache:
         return _alert_cache[key]
 
@@ -484,6 +480,13 @@ def generate_alert(date: str, audience: str) -> dict:
         result = fallback
     _alert_cache[key] = result
     return result
+
+
+def generate_alert(date: str, audience: str) -> dict:
+    from api.data import resolve_flood_date
+
+    iso = resolve_flood_date(date)
+    return phrase_alert(audience, get_stats(iso), get_lifelines(iso), get_ice(iso))
 
 
 def situation_report() -> str:
@@ -528,16 +531,13 @@ def template_for_audience(audience: str, stats: dict, lifelines: list, ice) -> s
     return " ".join(lines)
 
 
-def template_report() -> str:
-    info = list_dates()
-    normal = info["normal_date"]
-    dates = info["flood_dates"]
-    packs = [(iso, get_stats(iso), get_lifelines(iso), get_ice(iso)) for iso in dates]
+def report_markdown(packs, normal: str, place: str) -> str:
+    """Situation report from scenes already loaded. Does not look dates up again."""
     first, last = packs[0], packs[-1]
     lines = [
-        "# Cut Off situation report",
+        "# RCM FloodScope situation report",
         "",
-        f"Radar view of {PLACE}. "
+        f"Radar view of {place}. "
         "Every figure below is from a RADARSAT Constellation Mission scene.",
         "",
         "## What happened",
@@ -569,6 +569,8 @@ def template_report() -> str:
     for iso, _stats, lifelines, _ice in packs:
         lines.append(f"### {iso}")
         lines.append("")
+        if not lifelines:
+            lines.append("- No lifelines in this project.")
         for item in lifelines:
             where = "verified location" if item.get("verified") else "approximate location"
             if item.get("dist_flood_m") is None or item.get("status") == "no_data":
@@ -582,19 +584,26 @@ def template_report() -> str:
     lines.extend(["## River ice", ""])
     for iso, _stats, _lifelines, ice in packs:
         lines.append(f"- {_ice_line(iso, ice)}" if ice else f"- {iso}: no ice measurement in this scene.")
-    lines.extend([
-        "",
-        "## Limitations",
-        "",
-        "- The 30 April scene is a different, uncalibrated radar product. It was shifted about 40 m so it lines up with the other scenes.",
-        f"- The normal day is {normal}, the summer after the flood. The free archive used here starts in spring 2025, so there is no pre-flood summer scene.",
+    limits = [
         "- Where the river is ice-covered, open water under the ice is not in the water map, so flood extent beside a frozen town can look smaller than it was.",
         "- Distances are to the nearest detected water, at about 20 m resolution.",
         "- Some red patches away from the river can be pooled meltwater, wet snow, or radar noise. The water along the river is the part to use.",
-        "- The April 30 picture is grainier, so some ice flagged upstream that night can be noise.",
-        "",
-    ])
+    ]
+    if any(iso == "2025-04-30" for iso, *_rest in packs):
+        limits.insert(0, "- The 30 April scene is a different, uncalibrated radar product. It was shifted about 40 m so it lines up with the other scenes.")
+        limits.append("- The April 30 picture is grainier, so some ice flagged upstream that night can be noise.")
+    limits.insert(1 if any(iso == "2025-04-30" for iso, *_rest in packs) else 0,
+                  f"- The normal day is {normal}. The free archive used here starts in spring 2025, so there is no earlier summer scene.")
+    lines.extend(["", "## Limitations", ""] + limits + [""])
     return "\n".join(lines)
+
+
+def template_report() -> str:
+    info = list_dates()
+    normal = info["normal_date"]
+    dates = info["flood_dates"]
+    packs = [(iso, get_stats(iso), get_lifelines(iso), get_ice(iso)) for iso in dates]
+    return report_markdown(packs, normal, PLACE)
 
 
 # ---------------------------------------------------------------- tool loop (ask, alerts, report)
