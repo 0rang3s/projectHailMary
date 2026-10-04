@@ -1263,7 +1263,21 @@ def open_project():
         pass
     if llm_mod is not None and hasattr(llm_mod, "set_project"):
         place = proj.get("llm_place") or f"the flood in the radar project \"{proj.get('name', slug)}\""
-        llm_mod.set_project(place, proj.get("normal_date"))
+        llm_mod.set_project(
+            place,
+            proj.get("normal_date"),
+            proj.get("knowledge"),
+        )
+        try:
+            import ai.inference as inference_mod
+            inference_mod._findings_cache.clear()
+        except Exception:
+                pass
+
+        for cache_name in ("_ask_cache", "_alert_cache", "_report_cache", "_rewrite_cache"):
+            cache = getattr(llm_mod, cache_name, None)
+            if cache is not None:
+                cache.clear()
         st.session_state.report_place = place
     if st.session_state.get("open_slug") != slug:
         for key in ("date", "date_label", "lifeline", "map_center", "map_zoom", "chat", "alerts", "report_text"):
@@ -1274,6 +1288,7 @@ def open_project():
 
 # The original data/real folder, as if it were a project (?project=real).
 LEGACY = {
+    "knowledge": "Albany-2025",
     "name": "Albany River (data/real)", "title": "Albany River", "badge": "RCM · Spring 2025",
     "map_center": [52.24, -81.70], "map_zoom": 12,
     "phases": {"2025-04-30": ["Emergency", "#d7301f"], "2025-05-07": ["River opening", "#e06a12"],

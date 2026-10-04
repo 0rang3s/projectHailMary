@@ -9,6 +9,7 @@ This file does not import ai.llm, so there is no circular import.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -20,7 +21,7 @@ from pathlib import Path
 
 from api.data import DataError, get_ice, get_lifelines, get_stats, list_dates, revision
 
-VERSION = "inference-single-file-2026-10-03c"
+VERSION = "inference-single-file-2026-10-04f"
 RED_M = 200    # red is 200 m or less
 FLAT_M = 25    # a change smaller than this counts as "steady"
 
@@ -206,35 +207,77 @@ class _BM25:
 
 
 _kb: dict = {"sig": None, "chunks": [], "bm25": None}
+_SCOPE = None        # name of the open project's own document folder; None = shared documents only
+
+
+def set_knowledge(scope):
+    """Choose which project's documents are searched, in addition to the shared ones."""
+    global _SCOPE
+    _SCOPE = scope or None
+
+
+def _knowledge_dirs() -> list:
+    if not KNOWLEDGE_DIR.exists():
+        return []
+
+    subfolders = [
+        p for p in KNOWLEDGE_DIR.iterdir()
+        if p.is_dir() and not p.name.startswith(".")
+    ]
+
+    if not subfolders:
+        return [("", KNOWLEDGE_DIR)]
+
+    dirs = []
+
+    if (KNOWLEDGE_DIR / "_shared").is_dir():
+        dirs.append(("shared", KNOWLEDGE_DIR / "_shared"))
+
+    if _SCOPE and (KNOWLEDGE_DIR / _SCOPE).is_dir():
+        dirs.append((_SCOPE, KNOWLEDGE_DIR / _SCOPE))
+
+    # If no project scope is configured, search all knowledge folders.
+    if not dirs and not _SCOPE:
+        dirs = [
+            (p.name, p)
+            for p in subfolders
+            if p.name != "_shared"
+        ]
+
+    return dirs
 
 
 def _signature() -> tuple:
-    if not KNOWLEDGE_DIR.exists():
-        return ()
-    return tuple((p.name, p.stat().st_mtime_ns) for p in sorted(KNOWLEDGE_DIR.glob("*.md"))
-                 if not p.stem.startswith("_"))
+    return tuple((scope, p.name, p.stat().st_mtime_ns)
+                 for scope, d in _knowledge_dirs()
+                 for p in sorted(d.glob("*.md")) if not p.stem.startswith("_"))
 
 
 def _load_kb() -> dict:
     sig = _signature()
     if _kb["sig"] == sig:
         return _kb
-    chunks = []
-    for p in sorted(KNOWLEDGE_DIR.glob("*.md")) if KNOWLEDGE_DIR.exists() else []:
-        if p.stem.startswith("_"):
-            continue
-        blocks = [b.strip() for b in p.read_text(encoding="utf-8").split("\n\n") if b.strip()]
-        if not blocks or not blocks[0].lower().startswith("source:"):
-            print(f"knowledge file {p.name} skipped: the first line must start with 'source:'")
-            continue
-        first, *rest = blocks[0].splitlines()
-        url = first.split(":", 1)[1].strip()
-        paragraphs = ["\n".join(rest).strip()] if "\n".join(rest).strip() else []
-        paragraphs += blocks[1:]
-        for i, text in enumerate(paragraphs):
-            text = " ".join(text.split())
-            if len(text.split()) >= MIN_WORDS:
-                chunks.append({"id": f"{p.stem}#{i}", "source": p.stem, "url": url, "text": text})
+    chunks, seen = [], set()
+    for scope, d in _knowledge_dirs():
+        for p in sorted(d.glob("*.md")):
+            if p.stem.startswith("_"):
+                continue
+            blocks = [b.strip() for b in p.read_text(encoding="utf-8").split("\n\n") if b.strip()]
+            if not blocks or not blocks[0].lower().startswith("source:"):
+                print(f"knowledge file {p.name} skipped: the first line must start with 'source:'")
+                continue
+            first, *rest = blocks[0].splitlines()
+            url = first.split(":", 1)[1].strip()
+            paragraphs = ["\n".join(rest).strip()] if "\n".join(rest).strip() else []
+            paragraphs += blocks[1:]
+            for i, text in enumerate(paragraphs):
+                text = " ".join(text.split())
+                if len(text.split()) >= MIN_WORDS:
+                    cid = f"{p.stem}#{i}"
+                    if cid in seen:                      # same file name in two folders
+                        cid = f"{scope}:{cid}"
+                    seen.add(cid)
+                    chunks.append({"id": cid, "source": p.stem, "url": url, "text": text})
     _kb.update(sig=sig, chunks=chunks,
                bm25=_BM25([_tokens(c["text"]) for c in chunks]) if chunks else None)
     return _kb
@@ -259,12 +302,14 @@ def dense_ready() -> bool:
 
 
 def _index_stamp() -> str:
-    """Part of the answer-cache key: changes when any knowledge file changes."""
-    return f"kw-1|{hash(_signature())}|{len(_load_kb()['chunks'])}"
+    """Part of the answer-cache key. Changes when the open project's documents change, and is the same
+    after every restart (Python's built-in hash() is not, so a fixed digest is used)."""
+    digest = hashlib.sha1(repr(_signature()).encode()).hexdigest()[:12]
+    return f"kw-2|{digest}|{len(_load_kb()['chunks'])}"
 
 
 # llm.py reads inference.rag.index_stamp(); this keeps it working with no separate rag.py.
-rag = types.SimpleNamespace(VERSION="kw-1", KNOWLEDGE_DIR=KNOWLEDGE_DIR, index_stamp=_index_stamp)
+rag = types.SimpleNamespace(VERSION="kw-2", KNOWLEDGE_DIR=KNOWLEDGE_DIR, index_stamp=_index_stamp)
 
 
 STATUS_RULES = ("red = 200 m or less from flood water; yellow = within 1 km (1000 m); "
@@ -353,10 +398,17 @@ GROUNDING RULES (software checks these, and breaking them gets the claim thrown 
   Observations taken straight from a finding may be high. Use "likely" or "may" for every inference.
 
 DOCUMENTS
-- Documents describe how ice jams work, or describe the community, in general. They never show that
-  something happened on a particular date. Cite a document only when your claim is about that general
-  mechanism or background, and word it as "ice jams can ..." Put what happened on the date in a
-  separate claim that cites findings only.
+- There are two kinds of documents. Background documents describe how ice jams work, or describe a
+  community, in general: they never show that something happened on a particular date. Report
+  documents (municipal updates, news) say what authorities or reporters stated on or about a date.
+- Cite a background document only for the general mechanism or background, worded as "ice jams can ...".
+- Cite a report document only to say what was REPORTED, in its own claim that names the source and the
+  date (for example "the municipality reported on April 28, 2026 that ..."). Attribute every figure in
+  it (water levels, lengths) to the source. Never present a report as a radar measurement, and never
+  say radar confirms or contradicts it.
+- If the question asks what was reported (for example whether an alert or an evacuation order was
+  issued) and a report document in EVIDENCE covers it, answer from that document. Say "the available
+  documents do not cover it" only when no document in EVIDENCE does.
 - If the findings show jam_risk is false for the date, the ice-jam documents do not explain it. Say
   the available documents do not explain the change.
 - When a claim cites a document id, copy under 15 words from that document into doc_quote, exactly
@@ -442,11 +494,16 @@ _BASE_SYSTEM = SYSTEM
 _ALBANY_INTRO = "the spring 2025 Albany River ice-jam flood at Fort Albany and\nKashechewan"
 
 
+_APRIL30_LINE = "- If you cite 2025-04-30, note that scene is a grainier, shifted product, so treat it with care.\n"
+ALBANY = True      # True while the Albany project is open; Albany-only caveats apply only then
+
+
 def set_place(place):
     """Swap the Albany story for another project's (the rest of the rules stay the same)."""
-    global SYSTEM
+    global SYSTEM, ALBANY
     albany = place.startswith("the spring 2025 Albany River")
-    SYSTEM = _BASE_SYSTEM if albany else _BASE_SYSTEM.replace(_ALBANY_INTRO, place)
+    ALBANY = albany
+    SYSTEM = _BASE_SYSTEM if albany else _BASE_SYSTEM.replace(_ALBANY_INTRO, place).replace(_APRIL30_LINE, "")
 
 # ---------------------------------------------------------------- validation
 
@@ -565,7 +622,7 @@ def finish(result: dict, question: str) -> dict:
         for e in ev:
             if e in approx:
                 limits.append(f"{approx[e]} location is approximate (not verified).")
-        if "2025-04-30" in c.get("claim", "") or any("2025-04-30" in e for e in ev):
+        if ALBANY and ("2025-04-30" in c.get("claim", "") or any("2025-04-30" in e for e in ev)):
             limits.append("The 2025-04-30 scene is grainier and was shifted to line up, "
                           "so treat it with care.")
         kept.append(c)

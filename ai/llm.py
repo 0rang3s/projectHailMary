@@ -62,8 +62,6 @@ REPORT_SYSTEM = (
     "Do not invent other limitations, places, or causes. Plain language."
 )
 
-# Albany is the default story. set_project() swaps the place and the Albany-only notes
-# when the dashboard opens a different project.
 ALBANY_PLACE = "the spring 2025 Albany River ice-jam flood at Fort Albany and Kashechewan"
 _ALBANY_REPORT_NOTE = ("the April 30 scene is a different uncalibrated product and was shifted about 40 m to line up; "
                        "the normal day is the summer after the flood because the free archive starts in spring 2025; ")
@@ -71,8 +69,7 @@ _BASE_PROMPTS = {"ASK_SYSTEM": ASK_SYSTEM, "REPORT_SYSTEM": REPORT_SYSTEM}
 PLACE = ALBANY_PLACE
 
 
-def set_project(place=None, normal_date=None):
-    """Point the prompts at a project. place=None means the original Albany story."""
+def set_project(place=None, normal_date=None, knowledge=None):
     global ASK_SYSTEM, REPORT_SYSTEM, PLACE
     PLACE = place or ALBANY_PLACE
     albany = PLACE == ALBANY_PLACE
@@ -84,6 +81,7 @@ def set_project(place=None, normal_date=None):
         out[key] = text
     ASK_SYSTEM, REPORT_SYSTEM = out["ASK_SYSTEM"], out["REPORT_SYSTEM"]
     inference.set_place(PLACE)
+    inference.set_knowledge(knowledge)
 
 
 AUDIENCE = {
@@ -94,11 +92,11 @@ AUDIENCE = {
     ),
     "community": (
         "Write for people in the community. No jargon. At most 3 sentences. Say what the day "
-        "means for getting in and out: the airstrips and the causeway. Use only the numbers given."
+        "means for getting in and out, using the lifelines in the data (for example airstrips, roads or causeways). Use only the numbers given."
     ),
     "pilots": (
         "Write for pilots. Airstrips only: name, distance to water on this radar date, and the "
-        "normal distance. No other lifelines. Plain words."
+        "normal distance. No other lifelines. If the data holds no airstrips, say so in one sentence. Plain words."
     ),
 }
 
@@ -202,7 +200,7 @@ _alert_cache: dict[tuple, dict] = {}
 _report_cache: dict[str, str] = {}
 _rewrite_cache: dict[tuple, str] = {}
 
-LLM_VERSION = "llm-2026-10-03d"
+LLM_VERSION = "llm-2026-10-04e"
 _CACHE_DIR = Path(__file__).resolve().parents[1] / "data" / "cache"
 
 
@@ -242,13 +240,11 @@ def ask(question: str, history: list[dict] | None = None) -> dict:
 # ---------------------------------------------------------------- infer (main path)
 
 def _cache_path(question: str, ui: dict) -> Path:
-    """The key changes whenever the prompt, the findings, the documents or the screen state change."""
+    """The key changes whenever the prompt, the findings, the documents or the screen state change,
+    and is the same after a restart, so each question is paid for once."""
     stamp = (inference.SYSTEM + inference.NO_TOOLS_NOTE + revision() + json.dumps(ui, sort_keys=True)
              + inference.rag.index_stamp() + _ui_note({'date': 'x'}))
     stamp += json.dumps(inference.slim(inference.build_findings()), sort_keys=True)
-    if inference.KNOWLEDGE_DIR.exists():
-        stamp += "".join(f"{p.name}{p.stat().st_mtime_ns}"
-                         for p in sorted(inference.KNOWLEDGE_DIR.glob("*.md")))
     digest = hashlib.sha1((stamp + question.strip().lower()).encode()).hexdigest()[:20]
     return _CACHE_DIR / f"{digest}.json"
 
@@ -410,6 +406,17 @@ def infer(question: str, history: list[dict] | None = None, ui: dict | None = No
         findings = inference.build_findings()
         # With a fresh vector index, meaning-based search handles paraphrase, so skip the extra model call.
         expansion = "" if inference.dense_ready() else _rewrite_query(question, findings)
+        #print("=== RAG DEBUG ===")
+        #print("Question:", question)
+        #print("Expansion:", expansion)
+        #print("Knowledge dirs:", inference._knowledge_dirs())
+        #print("Knowledge directory:", inference.KNOWLEDGE_DIR)
+        #print("SCOPE:", inference._SCOPE)
+        #print("Knowledge directory exists:", inference.KNOWLEDGE_DIR.exists())
+        #print("Knowledge directory contents:", list(inference.KNOWLEDGE_DIR.iterdir()) if inference.KNOWLEDGE_DIR.exists() else "MISSING")
+        #print("Knowledge dirs:", inference._knowledge_dirs())
+        #print("Knowledge search:", inference.search_knowledge(question, k=10, expansion=expansion))
+       #print("=================")
         context = json.dumps(
             {"status_rules": inference.STATUS_RULES,
              "findings": inference.slim(findings),
@@ -442,10 +449,14 @@ def infer(question: str, history: list[dict] | None = None, ui: dict | None = No
 
 # ---------------------------------------------------------------- alerts and report
 
-def phrase_alert(audience: str, stats: dict, lifelines: list, ice) -> dict:
-    """Write one audience alert from numbers already loaded. Does not look the date up again."""
-    lifelines = lifelines or []
-    key = (stats.get("flood_date"), audience, stats.get("extra_water_km2"), len(lifelines))
+def generate_alert(date: str, audience: str) -> dict:
+    from api.data import resolve_flood_date
+
+    iso = resolve_flood_date(date)
+    stats = get_stats(iso)
+    lifelines = get_lifelines(iso)
+    ice = get_ice(iso)
+    key = (revision(), iso, audience)
     if key in _alert_cache:
         return _alert_cache[key]
 
@@ -480,13 +491,6 @@ def phrase_alert(audience: str, stats: dict, lifelines: list, ice) -> dict:
         result = fallback
     _alert_cache[key] = result
     return result
-
-
-def generate_alert(date: str, audience: str) -> dict:
-    from api.data import resolve_flood_date
-
-    iso = resolve_flood_date(date)
-    return phrase_alert(audience, get_stats(iso), get_lifelines(iso), get_ice(iso))
 
 
 def situation_report() -> str:
@@ -531,13 +535,16 @@ def template_for_audience(audience: str, stats: dict, lifelines: list, ice) -> s
     return " ".join(lines)
 
 
-def report_markdown(packs, normal: str, place: str) -> str:
-    """Situation report from scenes already loaded. Does not look dates up again."""
+def template_report() -> str:
+    info = list_dates()
+    normal = info["normal_date"]
+    dates = info["flood_dates"]
+    packs = [(iso, get_stats(iso), get_lifelines(iso), get_ice(iso)) for iso in dates]
     first, last = packs[0], packs[-1]
     lines = [
-        "# RCM FloodScope situation report",
+        "# Cut Off situation report",
         "",
-        f"Radar view of {place}. "
+        f"Radar view of {PLACE}. "
         "Every figure below is from a RADARSAT Constellation Mission scene.",
         "",
         "## What happened",
@@ -569,8 +576,6 @@ def report_markdown(packs, normal: str, place: str) -> str:
     for iso, _stats, lifelines, _ice in packs:
         lines.append(f"### {iso}")
         lines.append("")
-        if not lifelines:
-            lines.append("- No lifelines in this project.")
         for item in lifelines:
             where = "verified location" if item.get("verified") else "approximate location"
             if item.get("dist_flood_m") is None or item.get("status") == "no_data":
@@ -584,26 +589,22 @@ def report_markdown(packs, normal: str, place: str) -> str:
     lines.extend(["## River ice", ""])
     for iso, _stats, _lifelines, ice in packs:
         lines.append(f"- {_ice_line(iso, ice)}" if ice else f"- {iso}: no ice measurement in this scene.")
-    limits = [
+    albany = PLACE == ALBANY_PLACE
+    lines.extend(["", "## Limitations", ""])
+    if albany:
+        lines.append("- The 30 April scene is a different, uncalibrated radar product. It was shifted about 40 m so it lines up with the other scenes.")
+        lines.append(f"- The normal day is {normal}, the summer after the flood. The free archive used here starts in spring 2025, so there is no pre-flood summer scene.")
+    else:
+        lines.append(f"- The normal river comes from the scene dated {normal}. Dates are compared with that scene only.")
+    lines.extend([
         "- Where the river is ice-covered, open water under the ice is not in the water map, so flood extent beside a frozen town can look smaller than it was.",
         "- Distances are to the nearest detected water, at about 20 m resolution.",
         "- Some red patches away from the river can be pooled meltwater, wet snow, or radar noise. The water along the river is the part to use.",
-    ]
-    if any(iso == "2025-04-30" for iso, *_rest in packs):
-        limits.insert(0, "- The 30 April scene is a different, uncalibrated radar product. It was shifted about 40 m so it lines up with the other scenes.")
-        limits.append("- The April 30 picture is grainier, so some ice flagged upstream that night can be noise.")
-    limits.insert(1 if any(iso == "2025-04-30" for iso, *_rest in packs) else 0,
-                  f"- The normal day is {normal}. The free archive used here starts in spring 2025, so there is no earlier summer scene.")
-    lines.extend(["", "## Limitations", ""] + limits + [""])
+    ])
+    if albany:
+        lines.append("- The April 30 picture is grainier, so some ice flagged upstream that night can be noise.")
+    lines.append("")
     return "\n".join(lines)
-
-
-def template_report() -> str:
-    info = list_dates()
-    normal = info["normal_date"]
-    dates = info["flood_dates"]
-    packs = [(iso, get_stats(iso), get_lifelines(iso), get_ice(iso)) for iso in dates]
-    return report_markdown(packs, normal, PLACE)
 
 
 # ---------------------------------------------------------------- tool loop (ask, alerts, report)
@@ -815,12 +816,14 @@ def _community_template(stats: dict, lifelines: list, ice) -> str:
         item for item in lifelines
         if item.get("type") in {"airstrip", "causeway"} and item.get("dist_flood_m") is not None
     ]
+    if not access:
+        access = [item for item in lifelines if item.get("dist_flood_m") is not None]
     access.sort(key=lambda item: item["dist_flood_m"])
     if access:
         bits = [f"the {item['name']} is {item['dist_flood_m']} m from the water" for item in access]
         second = "For getting in and out, " + ", ".join(bits) + "."
     else:
-        second = "The airstrips and causeway could not be assessed from this radar scene."
+        second = "No lifeline could be assessed from this radar scene."
     third = f"This is the {when} radar scene, compared with the normal river on {_pretty(stats['normal_date'])}."
     return " ".join([first, second, third])
 
