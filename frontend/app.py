@@ -1028,7 +1028,7 @@ def chat_panel(scene, scenes):
         st.session_state.answer_phase = "show"
         st.rerun(scope="fragment")
 
-    show("<div class='drawer-title'><b>Alert for this date</b></div>")
+    show("<div class='drawer-title'><b>Briefings for past and current events</b></div>")
     labels = [label for _key, label in AUDIENCES]
     picked = st.radio("Audience", labels, horizontal=True, label_visibility="collapsed", key="audience-label")
     audience = next(key for key, label in AUDIENCES if label == picked)
