@@ -38,14 +38,13 @@ try:
 except ImportError:
     pass
 try:
-    import importlib
-    import api.llm as llm_mod
-    importlib.reload(llm_mod)
+    import ai.llm as llm_mod
     ask_model = llm_mod.ask
-    ask_with_data = llm_mod.ask_with_data
+    ask_with_data = getattr(llm_mod, "ask_with_data", None)
     generate_alert = llm_mod.generate_alert
     situation_report = llm_mod.situation_report
-except Exception:
+except Exception as exc:
+    print("AI module unavailable:", type(exc).__name__, exc)
     ask_model = ask_with_data = generate_alert = situation_report = None
 if HERE not in sys.path:
     sys.path.insert(0, HERE)

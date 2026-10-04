@@ -64,8 +64,12 @@ def ask_checked(question: str, date: str | None = None, audience_label: str | No
         print("AI bridge error:", type(exc).__name__, exc)
         return None
     summary = (raw or {}).get("summary") or ""
+    if (raw or {}).get("error_kind"):
+        # The assistant is busy or failed: tell the user, in words, instead of silently using the template.
+        return {"text": summary, "dates": [],
+                "raw": {"summary": summary, "claims": [], "not_known": [], "notice": True}}
     if not summary or any(marker in summary for marker in _UNAVAILABLE):
-        return None
+        return None                                   # no key configured: the page's own answer is intended
     return {"text": prettify_dates(plain_text(raw)), "dates": _dates_from(raw), "raw": raw}
 
 
@@ -75,6 +79,9 @@ def _e(text) -> str:
 
 def answer_html(raw: dict) -> str:
     """Single-line HTML (no blank lines, no indentation) so Markdown never turns it into a code block."""
+    if raw.get("notice"):
+        return ("<div style='padding:8px 10px;border:1px solid rgba(245,158,11,.55);border-radius:10px;"
+                f"color:#f59e0b'>⏳ {_e(raw.get('summary', ''))}</div>")
     parts = [f"<div>{_e(raw.get('summary', ''))}</div>"]
     if raw.get("summary_warning"):
         parts.append(f"<div style='margin-top:6px;font-size:12px;color:#f59e0b'>⚠ {_e(raw['summary_warning'])}</div>")

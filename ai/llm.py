@@ -178,6 +178,7 @@ _alert_cache: dict[tuple, dict] = {}
 _report_cache: dict[str, str] = {}
 _rewrite_cache: dict[tuple, str] = {}
 
+LLM_VERSION = "llm-2026-10-03d"
 _CACHE_DIR = Path(__file__).resolve().parents[1] / "data" / "cache"
 
 
@@ -261,26 +262,70 @@ def _rewrite_query(question: str, findings: dict) -> str:
     return text
 
 
+def _retry_seconds(exc: Exception):
+    """Seconds Groq says to wait, from text like 'try again in 23.03s' or 'try again in 1m21.648s'."""
+    match = re.search(r"try again in\s+(?:(\d+)m)?\s*(?:([0-9.]+)s)?", str(exc), re.I)
+    if not match or (match.group(1) is None and match.group(2) is None):
+        return None
+    return int(match.group(1) or 0) * 60 + float(match.group(2) or 0)
+
+
+def _failure_kind(exc: Exception):
+    text = str(exc).lower()
+    if _is_rate_limit(exc):
+        daily = "per day" in text or "tpd" in text
+        return ("daily_limit" if daily else "rate_limit"), _retry_seconds(exc)
+    return "error", None
+
+
+def _failure_message(kind: str, wait) -> str:
+    """Plain words, no digits, so the page's number check has nothing to flag."""
+    if kind == "rate_limit":
+        if wait is None or wait <= 10:
+            return "The assistant is busy right now. Please wait a few seconds and try again."
+        if wait <= 45:
+            return "The assistant is busy right now. Please wait about half a minute and try again."
+        return "The assistant is busy right now. Please wait about a minute and try again."
+    if kind == "daily_limit":
+        return ("The assistant has reached its usage limit for now. "
+                "Please try again in a few minutes, or later today.")
+    return "The assistant couldn't answer just now. Please try again in a moment."
+
+
 def _ask_model(client, messages: list[dict]) -> str:
-    """Try JSON mode, then plain mode, on the main model and then the fallback model."""
+    """Try JSON mode, then plain mode, on the main model and then the fallback model.
+    A short rate limit (15 seconds or less) is waited out once before moving on."""
     primary = os.environ.get("LLM_MODEL", "openai/gpt-oss-120b")
     fallback = os.environ.get("LLM_FALLBACK_MODEL", "openai/gpt-oss-20b")
     last = None
     for model in dict.fromkeys([primary, fallback]):
-        for json_mode in (True, False):
+        waited = False
+        modes = [True, False]
+        i = 0
+        while i < len(modes):
             params = {"model": model, "temperature": 0, "max_tokens": 1800, "messages": messages}
-            if json_mode:
+            if modes[i]:
                 params["response_format"] = {"type": "json_object"}
             try:
                 response = client.chat.completions.create(**params)
                 text = (response.choices[0].message.content or "").strip()
                 if text:
                     return text
+                i += 1
             except Exception as exc:
                 last = exc
-                print(f"infer: {model} (json_mode={json_mode}) failed:", exc)
-                if "json_validate_failed" not in str(exc):
-                    break          # rate limit or another error: go to the next model
+                print(f"infer: {model} (json_mode={modes[i]}) failed:", exc)
+                if _is_rate_limit(exc):
+                    wait = _retry_seconds(exc)
+                    if not waited and wait is not None and wait <= 15:
+                        waited = True
+                        time.sleep(wait + 0.5)
+                        continue                  # same model, same mode, once
+                    break                         # next model
+                if "json_validate_failed" in str(exc):
+                    i += 1                        # plain mode next
+                    continue
+                break                             # another error: next model
     raise last or RuntimeError("empty answer")
 
 
@@ -359,7 +404,8 @@ def infer(question: str, history: list[dict] | None = None, ui: dict | None = No
         out = inference.finish(result, question)
     except Exception as exc:
         print("infer failed:", exc)
-        return {**empty, "summary": "The AI service couldn't answer just now. Try again in a moment."}
+        kind, wait = _failure_kind(exc)
+        return {**empty, "summary": _failure_message(kind, wait), "error_kind": kind, "retry_after": wait}
 
     if path and (out["claims"] or out["verified"]):
         try:
